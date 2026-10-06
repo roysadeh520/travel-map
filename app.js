@@ -229,6 +229,15 @@ function spreadCities(iso2, max = 5) {
   }
   return out;
 }
+// province / state name (Hebrew if OSM has one, else English) followed by the country in Hebrew, e.g. "Mersin, טורקיה"
+async function regionName(lat, lon, iso2) {
+  try {
+    const r = await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=he,en&lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`,
+      { signal: AbortSignal.timeout(2500) });
+    const a = r?.address || {}, region = a.province || a.state || a.county || a.region;
+    return region ? `${region}, ${nameHe(iso2, iso2)}` : null;
+  } catch { return null; }
+}
 function nearestCity(lat, lon, maxKm = 60) {
   let best = null, bestKm = maxKm;
   for (const [he, , , clat, clon] of state.cities) {
@@ -720,8 +729,16 @@ function emergencyItem(iso2) {
   return `<div class="pr-item"><h4>🆘 חירום ונציגות ישראל</h4>
     ${nums ? `<div class="pr-line">מספרי חירום מקומיים: ${nums}</div>` : '<div class="pr-line">אין מידע על מספרי חירום</div>'}
     ${missions ? `<ul class="list compact">${missions}</ul>` : ''}
-    <a class="linkbtn" href="https://www.gov.il/he/collectors/embassies" target="_blank" rel="noopener">נציגויות ישראל בעולם (משרד החוץ) ←</a></div>`;
+    ${missionLink(iso2, p.mfaName)}</div>`;
 }
+// Foreign Ministry mission finder; it accepts the country as a URL filter, using its own spelling (mfaName)
+const MFA_FINDER = 'https://www.gov.il/he/Departments/dynamiccollectors/israeli-consular-services';
+function missionLink(iso2, mfaName) {
+  return mfaName
+    ? `<a class="linkbtn" href="${MFA_FINDER}?skip=0&shem_mdn=${encodeURIComponent(mfaName)}" target="_blank" rel="noopener">נציגות ישראל ב${esc(nameHe(iso2, iso2))} (משרד החוץ) ←</a>`
+    : `<a class="linkbtn" href="${MFA_FINDER}" target="_blank" rel="noopener">חיפוש נציגויות ישראל בעולם (משרד החוץ) ←</a>`;
+}
+
 function powerItem(iso2) {
   const p = state.practical[iso2] || {};
   if (!p.plugs && !p.voltage && !p.drives) return '';
@@ -1332,10 +1349,13 @@ function readHash() {
         mouseover: () => layer.setStyle({ weight: 2, color: '#1d2433' }),
         mouseout: () => countryLayer.resetStyle(layer),
         mousemove: e => { state.mouseLL = e.latlng; if (state.layer === 'temp') layer.getTooltip()?.update(); },
-        click: e => {
-          if (!f.properties.iso2) return;
+        click: async e => {
+          const iso2 = f.properties.iso2;
+          if (!iso2) return;
           const { lat, lng } = e.latlng, city = nearestCity(lat, lng);
-          selectCountry(f.properties.iso2, { point: { lat, lon: lng, clicked: true, label: city ? `ליד ${city}` : `${lat.toFixed(2)}°, ${lng.toFixed(2)}°` } });
+          // label the clicked point: nearest big city, else the region (reverse geocoding), else the country
+          const label = city ? `ליד ${city}` : (await regionName(lat, lng, iso2)) || nameHe(iso2, iso2);
+          selectCountry(iso2, { point: { lat, lon: lng, clicked: true, label } });
         },
       });
     },
