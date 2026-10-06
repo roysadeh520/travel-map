@@ -14,14 +14,6 @@ const ANTI = [
   { label: 'גבוהה', range: '61–80%', color: '#e0592a' },
   { label: 'גבוהה מאוד', range: '81–100%', color: '#b3261e' },
 ];
-const TEMP = [
-  { max: 0, color: '#3b6fd8', label: 'מתחת ל־0°' },
-  { max: 10, color: '#7fb2ec', label: '0°–10°' },
-  { max: 18, color: '#c6e3d6', label: '10°–18°' },
-  { max: 25, color: '#f9dd77', label: '18°–25°' },
-  { max: 32, color: '#f59b4c', label: '25°–32°' },
-  { max: Infinity, color: '#d94a2b', label: 'מעל 32°' },
-];
 // NSC travel-warning scale (המל"ל)
 const NSC = {
   1: { label: 'ללא אזהרת מסע', advice: 'לנקוט באמצעי זהירות רגילים', color: '#2e9e5b' },
@@ -97,7 +89,6 @@ const state = {
   nsc: {}, nscMeta: {},
   events: [],
   cities: [],           // [he, en, iso2, lat, lon, pop] — Natural Earth, for Hebrew search
-  temps: null, tempsEstimate: false,
 };
 const cache = new Map();
 
@@ -190,30 +181,55 @@ const WX = c => c == null ? ['', ''] :
   c <= 77 ? ['🌨️', 'שלג'] : c <= 82 ? ['🌧️', 'ממטרים'] : c <= 86 ? ['🌨️', 'ממטרי שלג'] : ['⛈️', 'סופות רעמים'];
 const avg = a => { const v = a.filter(x => x != null); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
 
-async function loadTemps() {
-  const key = `${state.from}_${state.to}`;
-  if (state.tempsKey === key) return;
+// daily max / min / rain for several points in one request; beyond the forecast horizon: 3-year average
+async function wxSeries(points, daily = 'temperature_2m_max,temperature_2m_min,precipitation_sum') {
   const plan = weatherPlan(state.from, state.to);
-  const pts = Object.keys(state.features).map(c => ({ c, p: repPoint(c) })).filter(x => x.p);
-  const kind = plan.kind === 'forecast' ? 'forecast' : 'archive';
-  const from = plan.kind === 'estimate' ? shiftYears(plan.from, plan.shift) : plan.from;
-  const to = plan.kind === 'estimate' ? shiftYears(plan.to, plan.shift) : plan.to;
-  toast('טוען טמפרטורות לכל המדינות…', 8000);
-  const temps = {};
-  try {
-    for (let i = 0; i < pts.length; i += 60) {
-      const chunk = pts.slice(i, i + 60);
-      const url = wxURL(kind, chunk.map(x => x.p.lat.toFixed(2)).join(','), chunk.map(x => x.p.lon.toFixed(2)).join(','), from, to, 'temperature_2m_max');
-      let res = await getJSON(url);
-      if (!Array.isArray(res)) res = [res];
-      res.forEach((r, j) => { temps[chunk[j].c] = avg(r?.daily?.temperature_2m_max || []); });
-    }
-    state.temps = temps; state.tempsKey = key; state.tempsEstimate = plan.kind === 'estimate';
-    $('#toast').hidden = true;
-  } catch (e) {
-    console.error(e);
-    toast('לא הצלחנו לטעון מזג אוויר (ייתכן שחרגנו ממכסת ה־API). נסו שוב בעוד דקה.');
+  const lats = points.map(p => p.lat.toFixed(2)).join(','), lons = points.map(p => p.lon.toFixed(2)).join(',');
+  const asList = r => (Array.isArray(r) ? r : [r]);
+  const runs = plan.kind === 'estimate'
+    ? await Promise.all([plan.shift, plan.shift - 1, plan.shift - 2].map(n =>
+        getJSON(wxURL('archive', lats, lons, shiftYears(plan.from, n), shiftYears(plan.to, n), daily)).then(asList)))
+    : [asList(await getJSON(wxURL(plan.kind === 'forecast' ? 'forecast' : 'archive', lats, lons, plan.from, plan.to, daily)))];
+  const len = daysBetween(plan.from, plan.to) + 1;
+  return points.map((_, k) => {
+    const days = [];
+    for (let i = 0; i < len; i++) days.push({
+      hi: avg(runs.map(r => r[k]?.daily?.temperature_2m_max?.[i])),
+      lo: avg(runs.map(r => r[k]?.daily?.temperature_2m_min?.[i])),
+      rain: avg(runs.map(r => r[k]?.daily?.precipitation_sum?.[i])),
+    });
+    return days;
+  });
+}
+
+// biggest cities of a country, spread out so a large country shows several climates
+const kmBetween = (a, b) => {
+  const R = 6371, rad = Math.PI / 180, dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+function spreadCities(iso2, max = 5) {
+  const f = state.features[iso2]; if (!f) return [];
+  const bb = L.geoJSON(f).getBounds();
+  const diag = kmBetween({ lat: bb.getSouth(), lon: bb.getWest() }, { lat: bb.getNorth(), lon: bb.getEast() });
+  const minKm = Math.min(600, Math.max(80, diag / 5));
+  const out = [];
+  for (const [he, en, cc, lat, lon] of state.cities) {
+    if (cc !== iso2) continue;
+    const c = { he, en, lat, lon };
+    if (out.every(o => kmBetween(o, c) >= minKm)) out.push(c);
+    if (out.length === max) break;
   }
+  return out;
+}
+function nearestCity(lat, lon, maxKm = 60) {
+  let best = null, bestKm = maxKm;
+  for (const [he, , , clat, clon] of state.cities) {
+    if (Math.abs(clat - lat) > 1 || Math.abs(clon - lon) > 1.5) continue;
+    const km = kmBetween({ lat, lon }, { lat: clat, lon: clon });
+    if (km < bestKm) { bestKm = km; best = he; }
+  }
+  return best;
 }
 
 async function countryWeather(pt) {
@@ -241,6 +257,27 @@ async function countryWeather(pt) {
   return { plan, tz: runs[0]?.timezone, days };
 }
 
+async function loadCitiesWx(iso2, token) {
+  const cities = spreadCities(iso2);
+  if (cities.length < 2) return;
+  try {
+    const series = await wxSeries(cities);
+    if (token !== panelToken || !$('#citiesWx')) return;
+    $('#citiesWx').innerHTML = `<h4 class="sub-h">ערים מרכזיות <small>· לחצו לפירוט יומי</small></h4>
+      <table class="wx cities">${cities.map((c, k) => {
+        const d = series[k], hi = avg(d.map(x => x.hi)), lo = avg(d.map(x => x.lo)), wet = d.filter(x => x.rain >= 1).length;
+        return `<tr data-city="${k}"><td>${esc(c.he)}</td>
+          <td><span class="tchip" style="background:${tempColor(hi)}">${Math.round(hi)}°</span></td>
+          <td class="lo">${Math.round(lo)}°</td><td>${wet ? `🌧️ ${wet}` : '☀️'}</td></tr>`;
+      }).join('')}</table>`;
+    $('#citiesWx').onclick = e => {
+      const k = e.target.closest('[data-city]')?.dataset.city; if (k == null) return;
+      const c = cities[+k];
+      selectCountry(iso2, { point: { lat: c.lat, lon: c.lon, label: c.he, clicked: true } });
+    };
+  } catch (e) { console.error(e); }
+}
+
 // ---------- holidays ----------
 async function holidays(iso2) {
   const y0 = parse(state.from).getFullYear(), y1 = parse(state.to).getFullYear();
@@ -259,6 +296,162 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19,
 }).addTo(map);
 
+// ---------- temperature heat map ----------
+// Grid points regular in *screen* space (snapped to a lat/lon lattice so panning reuses cached values) are fetched
+// from Open-Meteo for land only, painted one pixel per point into a tiny canvas, scaled up with smoothing
+// (= bilinear interpolation) and clipped to the land polygons.
+const TEMP_STOPS = [[-25, [44, 62, 145]], [-10, [59, 111, 216]], [0, [127, 178, 236]], [10, [198, 227, 214]],
+  [18, [249, 221, 119]], [25, [245, 155, 76]], [32, [217, 74, 43]], [40, [139, 26, 26]]];
+function tempRGB(t) {
+  if (t <= TEMP_STOPS[0][0]) return TEMP_STOPS[0][1];
+  for (let i = 1; i < TEMP_STOPS.length; i++) {
+    const [t1, c1] = TEMP_STOPS[i], [t0, c0] = TEMP_STOPS[i - 1];
+    if (t <= t1) { const k = (t - t0) / (t1 - t0); return c0.map((v, j) => Math.round(v + k * (c1[j] - v))); }
+  }
+  return TEMP_STOPS[TEMP_STOPS.length - 1][1];
+}
+const tempColor = t => `rgb(${tempRGB(t).join(',')})`;
+
+map.createPane('heat');
+map.getPane('heat').style.zIndex = 350;
+map.getPane('heat').style.pointerEvents = 'none';
+const heatCanvas = L.DomUtil.create('canvas', 'heat-canvas', map.getPane('heat'));
+const heat = { grid: null, cols: 0, rows: 0, w: 0, h: 0, origin: null, zoom: null, estimate: false, seq: 0 };
+const tempCache = new Map();
+const MAX_HEAT_POINTS = 220;   // Open-Meteo counts every location as one call (600/min on the free tier)
+const pointMarker = L.circleMarker([0, 0], { radius: 6, color: '#fff', weight: 2, fillColor: '#1d2433', fillOpacity: 1 });
+
+const niceStep = d => [0.1, 0.25, 0.5, 1, 2, 2.5, 5, 10].find(s => s >= d) || 10;
+const snapTo = (v, step) => Math.round(v / step) * step;
+const wrapLon = lon => ((lon + 540) % 360) - 180;
+function isLand(lat, lon) {
+  for (const f of landFeatures) {
+    const b = f.bbox;
+    if (lat < b[1] || lat > b[3] || lon < b[0] || lon > b[2]) continue;
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    for (const poly of polys) {
+      let inside = false;
+      for (const ring of poly) for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i], [xj, yj] = ring[j];
+        if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      if (inside) return true;
+    }
+  }
+  return false;
+}
+
+let heatTimer;
+async function loadHeat() {
+  if (state.layer !== 'temp' || !landFeatures.length) return;
+  const seq = ++heat.seq, size = map.getSize();
+  const cols = Math.max(8, Math.min(22, Math.round(size.x / 50))), rows = Math.max(6, Math.round(cols * size.y / size.x));
+  // snap to half the grid spacing: panning still hits the cache, but a sample never drifts more than a quarter cell
+  const b = map.getBounds(), step = niceStep(Math.min(360, b.getEast() - b.getWest()) / cols / 2);
+  const plan = weatherPlan(state.from, state.to);
+  const from = plan.kind === 'estimate' ? shiftYears(plan.from, plan.shift) : plan.from;
+  const to = plan.kind === 'estimate' ? shiftYears(plan.to, plan.shift) : plan.to;
+  const kind = plan.kind === 'forecast' ? 'forecast' : 'archive';
+
+  const samples = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const ll = map.containerPointToLatLng([(c + 0.5) * size.x / cols, (r + 0.5) * size.y / rows]);
+    const rawLat = Math.max(-84, Math.min(84, ll.lat)), rawLon = wrapLon(ll.lng);
+    const lat = +snapTo(rawLat, step).toFixed(2), lon = +snapTo(rawLon, step).toFixed(2);
+    samples.push({ lat, lon, land: isLand(rawLat, rawLon) || isLand(lat, lon), key: `${kind}_${from}_${to}_${lat}_${lon}` });
+  }
+  const need = [...new Map(samples.filter(s => s.land && !tempCache.has(s.key)).map(s => [s.key, s])).values()].slice(0, MAX_HEAT_POINTS);
+  if (need.length) toast('טוען טמפרטורות…', 8000);
+  try {
+    for (let i = 0; i < need.length; i += 100) {
+      const chunk = need.slice(i, i + 100);
+      let res = await getJSON(wxURL(kind, chunk.map(p => p.lat).join(','), chunk.map(p => p.lon).join(','), from, to, 'temperature_2m_max'));
+      if (!Array.isArray(res)) res = [res];
+      res.forEach((r, j) => tempCache.set(chunk[j].key, avg(r?.daily?.temperature_2m_max || [])));
+    }
+  } catch (e) {
+    console.error(e);
+    toast('לא הצלחנו לטעון טמפרטורות (ייתכן שחרגנו ממכסת Open-Meteo). נסו שוב בעוד דקה.');
+  }
+  if (seq !== heat.seq || state.layer !== 'temp') return;
+  if (need.length) $('#toast').hidden = true;
+
+  // ocean cells take the average of their land neighbours, so colours don't fade at the coast
+  let grid = samples.map(s => (s.land ? tempCache.get(s.key) ?? null : null));
+  for (let pass = 0; pass < 4 && grid.some(v => v == null); pass++) {
+    grid = grid.map((v, i) => {
+      if (v != null) return v;
+      const r = Math.floor(i / cols), c = i % cols, near = [];
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const rr = r + dr, cc = c + dc;
+        if ((dr || dc) && rr >= 0 && rr < rows && cc >= 0 && cc < cols && grid[rr * cols + cc] != null) near.push(grid[rr * cols + cc]);
+      }
+      return near.length ? avg(near) : null;
+    });
+  }
+  Object.assign(heat, { grid, cols, rows, w: size.x, h: size.y, origin: map.containerPointToLayerPoint([0, 0]), zoom: map.getZoom(), estimate: plan.kind === 'estimate' });
+  drawHeat();
+  drawLegend();
+}
+
+function drawHeat() {
+  const ctx = heatCanvas.getContext('2d');
+  if (state.layer !== 'temp' || !heat.grid || heat.zoom !== map.getZoom()) { ctx.clearRect(0, 0, heatCanvas.width, heatCanvas.height); return; }
+  const { grid, cols, rows, w, h } = heat;
+  heatCanvas.width = w; heatCanvas.height = h;
+  heatCanvas.style.width = w + 'px'; heatCanvas.style.height = h + 'px';
+  L.DomUtil.setPosition(heatCanvas, heat.origin);
+  heatCanvas.style.opacity = '';
+
+  const small = document.createElement('canvas');
+  small.width = cols; small.height = rows;
+  const sctx = small.getContext('2d'), img = sctx.createImageData(cols, rows);
+  grid.forEach((t, i) => { if (t != null) img.data.set([...tempRGB(t), 255], i * 4); });
+  sctx.putImageData(img, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(small, 0, 0, w, h);
+
+  // keep only land
+  const view = map.getBounds().pad(0.1);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.beginPath();
+  for (const f of landFeatures) {
+    const b = f.bbox;
+    if (b[2] < view.getWest() || b[0] > view.getEast() || b[3] < view.getSouth() || b[1] > view.getNorth()) continue;
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    for (const poly of polys) for (const ring of poly) ring.forEach(([lon, lat], i) => {
+      const p = map.latLngToLayerPoint([lat, lon]).subtract(heat.origin);
+      i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
+    });
+  }
+  ctx.fill('evenodd');
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+// temperature under the cursor, bilinear on the grid
+function tempAt(ll) {
+  const { grid, cols, rows, w, h } = heat;
+  if (!grid || heat.zoom !== map.getZoom()) return null;
+  const p = map.latLngToLayerPoint(ll).subtract(heat.origin);
+  const gx = Math.max(0, Math.min(cols - 1, p.x / w * cols - 0.5)), gy = Math.max(0, Math.min(rows - 1, p.y / h * rows - 0.5));
+  const x0 = Math.floor(gx), y0 = Math.floor(gy), x1 = Math.min(cols - 1, x0 + 1), y1 = Math.min(rows - 1, y0 + 1);
+  const v = (x, y) => grid[y * cols + x];
+  const q = [v(x0, y0), v(x1, y0), v(x0, y1), v(x1, y1)];
+  if (q.some(x => x == null)) return avg(q);
+  const fx = gx - x0, fy = gy - y0;
+  return (q[0] * (1 - fx) + q[1] * fx) * (1 - fy) + (q[2] * (1 - fx) + q[3] * fx) * fy;
+}
+
+let landFeatures = [];
+map.on('zoomstart', () => { heatCanvas.style.opacity = 0; });
+map.on('moveend resize', () => {
+  if (state.layer !== 'temp') return;
+  drawHeat();
+  clearTimeout(heatTimer);
+  heatTimer = setTimeout(loadHeat, 350);
+});
+
 let countryLayer;
 function fillFor(iso2) {
   if (!iso2) return NODATA;
@@ -267,14 +460,14 @@ function fillFor(iso2) {
     if (state.riskMode === 'adl') { const a = state.anti[iso2]; return a ? ANTI[a.level].color : NODATA; }
     return riskOf(iso2)?.color || NODATA;
   }
-  if (state.layer === 'temp') { const t = state.temps?.[iso2]; return t == null ? NODATA : TEMP.find(b => t < b.max).color; }
+  if (state.layer === 'temp') return '#000';
   return eventsInRange(iso2).length ? EVENT_ON : EVENT_OFF;
 }
 function styleFor(f) {
   const sel = f.properties.iso2 && f.properties.iso2 === state.selected;
   // fade the fill as the user zooms in so the street map stays readable
   const z = map.getZoom();
-  const op = z >= 9 ? 0.12 : z >= 6 ? 0.35 : 0.72;
+  const op = state.layer === 'temp' ? 0 : z >= 9 ? 0.12 : z >= 6 ? 0.35 : 0.72;
   // NSC "combined" warnings: fill = most of the country, dashed outline in the colour of the riskier regions
   const key = keyOf(f.properties), w = nscFor(key), fill = fillFor(key);
   const mixed = state.layer === 'risk' && state.riskMode !== 'adl' && w?.mixed;
@@ -298,7 +491,10 @@ function tooltipFor(p) {
       <div class="tt-row">🚨 מל״ל: ${nscLine}</div>
       <div class="tt-row">🛡️ אנטישמיות: ${adlLine}</div>`;
   }
-  else if (state.layer === 'temp') { const t = state.temps?.[p.iso2]; extra = t == null ? 'אין נתונים' : `ממוצע מקסימום: ${Math.round(t)}°`; }
+  else if (state.layer === 'temp') {
+    const t = state.mouseLL ? tempAt(state.mouseLL) : null;
+    extra = t == null ? 'לחצו לפרטי מזג האוויר' : `🌡️ כאן: ${Math.round(t)}° <small>(ממוצע מקסימום יומי)</small>`;
+  }
   else { const ev = eventsInRange(p.iso2); extra = ev.length ? ev.map(e => (CAT_ICON[e.cat] || '') + ' ' + e.name).join('<br>') : 'אין אירועים במאגר בתאריכים אלה'; }
   return `<b>${esc(n)}</b><br><span style="color:#6b7385">${extra}</span>`;
 }
@@ -332,8 +528,11 @@ function drawLegend() {
       <div class="sub">60% אזהרת המל״ל (עדכני) + 40% עמדות אנטישמיות (ADL 01/2025). אזהרת רמה 4 → לפחות 80, רמה 3 → לפחות 60.</div>`;
     L_.innerHTML = `<h4>מדד סיכון ליהודים וישראלים</h4>${seg}${body}`;
   } else if (state.layer === 'temp') {
-    L_.innerHTML = `<h4>טמפרטורה מקסימלית ממוצעת</h4>${rows(TEMP)}
-      <div class="sub">נמדד בבירה של כל מדינה${state.tempsEstimate ? ' · הערכה לפי השנה הקודמת (מעבר לטווח התחזית)' : ''}</div>`;
+    const ticks = [-20, -10, 0, 10, 20, 30, 40];
+    L_.innerHTML = `<h4>טמפרטורה מקסימלית ממוצעת</h4>
+      <div class="tbar" style="background:linear-gradient(to right, ${ticks.map(t => tempColor(t)).join(', ')})"></div>
+      <div class="tticks">${ticks.map(t => `<span>${t}°</span>`).join('')}</div>
+      <div class="sub">רשת נקודות לפי האזור שעל המסך – התקרבו לפירוט. לחיצה על מדינה מציגה מזג אוויר בנקודה.${heat.estimate ? '<br>הערכה לפי אותם תאריכים בשנה הקודמת (מעבר לטווח התחזית).' : ''}</div>`;
   } else {
     L_.innerHTML = `<h4>אירועים עונתיים בתאריכים שנבחרו</h4>${rows([{ color: EVENT_ON, label: 'יש אירועים' }, { color: EVENT_OFF, label: 'אין במאגר' }])}
       <div class="sub">${Object.keys(CAT_ICON).map(k => `${CAT_ICON[k]} ${CAT_NAME[k]}`).join(' · ')}</div>`;
@@ -352,8 +551,8 @@ async function setLayer(layer) {
   state.layer = layer;
   $$('.layers button').forEach(b => b.classList.toggle('on', b.dataset.layer === layer));
   if (layer === 'events') { drawEventMarkers(); eventLayer.addTo(map); } else eventLayer.remove();
-  if (layer === 'temp') await loadTemps();
   restyle(); drawLegend(); saveHash();
+  if (layer === 'temp') loadHeat(); else drawHeat();
 }
 
 // ---------- panel ----------
@@ -362,6 +561,8 @@ async function selectCountry(iso2, { zoom = false, point = null } = {}) {
   if (!f) return;
   state.selected = iso2;
   state.point = point || repPoint(iso2);
+  pointMarker.remove();
+  if (point?.clicked) pointMarker.setLatLng([point.lat, point.lon]).addTo(map);
   restyle();
   if (zoom) fitCountry(iso2);
   saveHash();
@@ -470,11 +671,13 @@ async function renderPanel() {
       : plan.kind === 'actual' ? 'נתונים היסטוריים בפועל' : 'תחזית';
     $('#wxCard').innerHTML = `<h3>🌤️ מזג אוויר${pt.label ? ` · ${esc(pt.label)}` : ''}</h3>
       <div class="wxsum"><span>מקס׳ <b class="hi">${Math.round(hi)}°</b></span><span>מינ׳ <b class="lo">${Math.round(lo)}°</b></span><span>ימי גשם <b>${rainy}</b>/${days.length}</span></div>
+      <div id="citiesWx"></div>
       <table class="wx"><tr><th>יום</th><th></th><th>מקס׳</th><th>מינ׳</th><th>משקעים</th></tr>
       ${days.map(d => { const [ic, t] = WX(d.code); return `<tr><td>${dayLabel(d.date)}</td><td title="${t}">${ic}</td>
         <td class="hi">${d.hi == null ? '–' : Math.round(d.hi) + '°'}</td><td class="lo">${d.lo == null ? '–' : Math.round(d.lo) + '°'}</td>
         <td>${d.rain == null ? '–' : d.rain.toFixed(1) + ' מ״מ'}</td></tr>`; }).join('')}</table>
       <div class="meta">${note} · Open-Meteo</div>`;
+    loadCitiesWx(iso2, token);
   }).catch(e => { console.error(e); if (token === panelToken) $('#wxCard').querySelector('.spinner').textContent = 'לא הצלחנו לטעון מזג אוויר'; });
 
   // holidays
@@ -493,7 +696,7 @@ $('#panelBody').addEventListener('click', e => {
   if (act === 'share') navigator.clipboard?.writeText(location.href).then(() => toast('הקישור הועתק'));
 });
 $('#close').addEventListener('click', () => {
-  $('#panel').hidden = true; state.selected = null; restyle(); saveHash();
+  $('#panel').hidden = true; state.selected = null; pointMarker.remove(); restyle(); saveHash();
 });
 
 // ---------- search ----------
@@ -616,8 +819,7 @@ function setDates(from, to, { silent = false } = {}) {
   fp.setDate([parse(from), parse(to)], false);
 }
 async function datesChanged() {
-  state.tempsKey = null;
-  if (state.layer === 'temp') await loadTemps();
+  if (state.layer === 'temp') loadHeat();
   if (state.layer === 'events') drawEventMarkers();
   restyle(); drawLegend(); saveHash();
   if (state.selected) renderPanel();
@@ -761,6 +963,12 @@ function readHash() {
   state.events = events.events;
   fetch('data/cities.json').then(r => r.json()).then(c => (state.cities = c)).catch(() => {});
   for (const f of geo.features) if (f.properties.iso2 && !state.features[f.properties.iso2]) state.features[f.properties.iso2] = f;
+  landFeatures = geo.features.filter(f => f.properties.iso2 !== 'AQ').map(f => {
+    let x0 = 180, y0 = 90, x1 = -180, y1 = -90;
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    for (const poly of polys) for (const [x, y] of poly[0]) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    return { geometry: f.geometry, bbox: [x0, y0, x1, y1] };
+  });
 
   countryLayer = L.geoJSON(geo, {
     style: styleFor,
@@ -769,7 +977,12 @@ function readHash() {
       layer.on({
         mouseover: () => layer.setStyle({ weight: 2, color: '#1d2433' }),
         mouseout: () => countryLayer.resetStyle(layer),
-        click: () => f.properties.iso2 && selectCountry(f.properties.iso2),
+        mousemove: e => { state.mouseLL = e.latlng; if (state.layer === 'temp') layer.getTooltip()?.update(); },
+        click: e => {
+          if (!f.properties.iso2) return;
+          const { lat, lng } = e.latlng, city = nearestCity(lat, lng);
+          selectCountry(f.properties.iso2, { point: { lat, lon: lng, clicked: true, label: city ? `ליד ${city}` : `${lat.toFixed(2)}°, ${lng.toFixed(2)}°` } });
+        },
       });
     },
   }).addTo(map);

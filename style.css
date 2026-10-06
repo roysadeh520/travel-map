@@ -303,3 +303,13 @@ span.flatpickr-weekday { color: var(--muted); font-weight: 500; font-size: 12px;
 .flatpickr-day.selected.endRange, .flatpickr-day.endRange.endRange { border-radius: 10px 0 0 10px; }
 .flatpickr-day.selected.startRange.endRange { border-radius: 10px; }
 .flatpickr-day.inRange, .flatpickr-day.startRange, .flatpickr-day.endRange { box-shadow: none !important; }
+
+/* ---------- temperature heat map ---------- */
+.heat-canvas { position: absolute; top: 0; left: 0; opacity: .8; transition: opacity .2s; }
+.tbar { height: 10px; border-radius: 5px; margin: 4px 0 3px; }
+.tticks { display: flex; justify-content: space-between; direction: ltr; font-size: 11px; color: var(--muted); }
+.sub-h { margin: 10px 0 4px; font-size: 13px; font-weight: 500; }
+.sub-h small { color: var(--muted); font-weight: 400; }
+table.wx.cities tr { cursor: pointer; }
+table.wx.cities tr:hover td { background: var(--accent-soft); }
+.tchip { display: inline-block; min-width: 38px; text-align: center; border-radius: 6px; padding: 1px 6px; font-weight: 500; color: #1d2433; }
