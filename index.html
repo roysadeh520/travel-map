@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>מפת מטיילים</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>🌍 מפת מטיילים</h1>
+
+  <div class="search">
+    <input id="q" type="search" autocomplete="off" placeholder="חפשו מדינה, עיר או כתובת…">
+    <button id="qbtn" title="חיפוש">🔎</button>
+    <ul id="results" hidden></ul>
+  </div>
+
+  <div class="layers" role="tablist">
+    <button data-layer="risk" class="on">מדד סיכון</button>
+    <button data-layer="temp">טמפרטורה</button>
+    <button data-layer="events">אירועים</button>
+  </div>
+
+  <div class="dates">
+    <label>📆 <input id="range" class="range" placeholder="dd/mm/yyyy – dd/mm/yyyy" autocomplete="off"></label>
+    <div class="presets">
+      <button data-preset="week">השבוע</button>
+      <button data-preset="nextmonth">החודש הבא</button>
+      <button data-preset="december">דצמבר</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="map"></div>
+  <div class="mapbtns">
+    <button id="home" title="תצוגת עולם">🌐</button>
+    <button id="locate" title="המיקום שלי">📍</button>
+    <button id="jewish" title="בתי כנסת ומסעדות כשרות באזור (בזום קרוב)">🕍</button>
+  </div>
+  <div id="legend"></div>
+  <div id="toast" hidden></div>
+
+  <aside id="panel" hidden>
+    <button id="close" title="סגירה">✕</button>
+    <div id="panelBody"></div>
+  </aside>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/he.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

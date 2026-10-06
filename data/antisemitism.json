@@ -1,0 +1,635 @@
+{
+ "_meta": {
+  "demo": false,
+  "source": "ADL Global 100: An Index of Antisemitism, 2025 (סקר ב־103 מדינות וטריטוריות)",
+  "url": "https://www.adl.org/adl-global-100-index-antisemitism",
+  "note": "רמה = אחוז המבוגרים במדינה המחזיקים בעמדות אנטישמיות לפי מדד ADL, בחמש קבוצות כמו במפה הרשמית. מדינות שלא נסקרו מסומנות \"לא נסקרה\".",
+  "levels": [
+   "0–20%",
+   "21–40%",
+   "41–60%",
+   "61–80%",
+   "81–100%"
+  ]
+ },
+ "countries": {
+  "PS": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "VN": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "VE": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "UY": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "US": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "GB": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "AE": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "UA": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "UG": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "TR": {
+   "level": 3,
+   "range": "61–80%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "TN": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "TH": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "TZ": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CH": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "SE": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "SD": {
+   "level": 3,
+   "range": "61–80%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "ES": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "KR": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "ZA": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "SI": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "SG": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "RS": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "SN": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "SA": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "RU": {
+   "level": 3,
+   "range": "61–80%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "RO": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "QA": {
+   "level": 3,
+   "range": "61–80%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "PT": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "PL": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "PH": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "PE": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "PY": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "OM": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "NO": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "NG": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "NI": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "NZ": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "NL": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "MA": {
+   "level": 3,
+   "range": "61–80%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "ME": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "MN": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "MD": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "MX": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "MU": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "MY": {
+   "level": 3,
+   "range": "61–80%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "LT": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "LY": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "LB": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "LV": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "LA": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "KW": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "KE": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "KZ": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "JO": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "JP": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "JM": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "IT": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "IE": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "IQ": {
+   "level": 3,
+   "range": "61–80%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "IR": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "ID": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "IN": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "IS": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "HU": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "HN": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "GT": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "GR": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "GH": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "DE": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "GE": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "FR": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "FI": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "EE": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "SV": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "EG": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "EC": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "DO": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "DK": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CZ": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CY": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "HR": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CI": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CR": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CO": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CN": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CL": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CA": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "CM": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "BG": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "BR": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "BW": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "BA": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "BO": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "BE": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "BY": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "BD": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "BH": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "AZ": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "AT": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "AU": {
+   "level": 0,
+   "range": "0–20%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "AM": {
+   "level": 2,
+   "range": "41–60%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "AR": {
+   "level": 1,
+   "range": "21–40%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  },
+  "DZ": {
+   "level": 4,
+   "range": "81–100%",
+   "source": "ADL Global 100 (2025)",
+   "updated": "2025-01"
+  }
+ }
+}
