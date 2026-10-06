@@ -628,7 +628,8 @@ function drawLegend() {
 // phone: the filter rows can be collapsed (shown by default; the choice is remembered)
 function setFiltersHidden(hidden) {
   document.body.classList.toggle('filters-hidden', hidden);
-  $('#filtersToggle').textContent = hidden ? '⚙️ סינון ▾' : '⚙️ סינון ▴';
+  $('#filtersToggle').textContent = hidden ? '▼' : '▲';
+  $('#filtersToggle').setAttribute('aria-label', hidden ? 'הצגת הפילטרים' : 'הסתרת הפילטרים');
   try { localStorage.setItem('filtersHidden', hidden ? '1' : ''); } catch {}
   setTimeout(() => map.invalidateSize(), 50);
 }
@@ -655,6 +656,7 @@ async function setLayer(layer) {
 async function selectCountry(iso2, { zoom = false, point = null } = {}) {
   const f = state.features[iso2];
   if (!f) return;
+  if (iso2 !== state.selected) $('#panel').scrollTop = 0;
   state.selected = iso2;
   state.point = point || repPoint(iso2);
   pointMarker.remove();
@@ -1092,7 +1094,7 @@ async function datesChanged() {
 }
 // one range picker, shown and typed as dd/mm/yyyy
 const fp = flatpickr('#range', {
-  mode: 'range', dateFormat: 'd/m/Y', allowInput: true, disableMobile: true,
+  mode: 'range', dateFormat: 'd/m/Y', allowInput: innerWidth > 760, disableMobile: true,
   static: true, // avoids flatpickr reading cross-origin stylesheets when positioning the popup
   showMonths: innerWidth > 760 ? 2 : 1, monthSelectorType: 'static',
   locale: { ...flatpickr.l10ns.he, rangeSeparator: ' – ' },

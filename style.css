@@ -398,12 +398,18 @@ body.finder-open #legend { display: none; }
 /* ---------- phone layout ---------- */
 .filters-toggle, .f-map { display: none; }
 @media (max-width: 760px) {
+  /* collapse arrow at the top-left corner (end of the first row in RTL) */
+  .search { order: 1; }
   .filters-toggle {
-    display: block; order: -1; border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
-    padding: 6px 10px; font-size: 13px; color: var(--muted); white-space: nowrap;
+    display: flex; align-items: center; justify-content: center; order: 2; flex: none;
+    width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); background: var(--surface);
+    border-radius: 10px; font-size: 17px; line-height: 1; color: var(--muted);
   }
+  .layers { order: 3; } .finder-btn { order: 4; } .dates { order: 5; }
+  /* 16px text fields: phones don't auto-zoom on focus */
+  .search input, #finder input[type=number], #finder select { font-size: 16px; }
   /* row 1: filter toggle + search · row 2: layers + finder · row 3: dates + presets */
-  .search { flex: 1 1 calc(100% - 110px); }
+  .search { flex: 1 1 calc(100% - 60px); }
   .layers { flex: 1 1 auto; }
   .finder-btn { flex: none; }
   body.filters-hidden .layers, body.filters-hidden .dates, body.filters-hidden .finder-btn { display: none; }
