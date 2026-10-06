@@ -378,17 +378,48 @@ body.finder-open #legend { display: none; }
 .sh-times small { color: var(--muted); }
 
 /* ---------- PDF export (html2pdf renders a detached copy of the panel) ---------- */
-.pdf-sheet {
-  width: 720px; background: #fff; color: #1d2433;
-  font-family: Heebo, sans-serif; font-size: 13px; padding: 4px 6px;
+.print-sheet { display: none; }
+@media print {
+  @page { size: A4; margin: 12mm; }
+  html, body { height: auto; display: block; background: #fff; }
+  body > *:not(.print-sheet) { display: none !important; }
+  .print-sheet { display: block; color: #1d2433; font-family: Heebo, sans-serif; font-size: 12px;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-sheet .pdf-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #2f6fde; padding-bottom: 6px; margin-bottom: 10px; }
+  .print-sheet .pdf-brand { font-weight: 700; color: #2f6fde; font-size: 15px; }
+  .print-sheet .pdf-meta { color: #6b7385; font-size: 11px; }
+  .print-sheet .pdf-foot { margin-top: 14px; padding-top: 6px; border-top: 1px solid #e2e5ea; color: #6b7385; font-size: 9px; word-break: break-all; }
+  .print-sheet details > summary::after { display: none; }
+  .print-sheet .pr-grid { grid-template-columns: 1fr 1fr; }
+  .print-sheet a { color: #2f6fde; text-decoration: none; }
+  .print-sheet .card, .print-sheet .pr-item, .print-sheet aside.note, .print-sheet tr, .print-sheet li { break-inside: avoid; }
 }
-.pdf-sheet .pdf-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #2f6fde; padding-bottom: 6px; margin-bottom: 10px; }
-.pdf-sheet .pdf-brand { font-weight: 700; color: #2f6fde; font-size: 15px; }
-.pdf-sheet .pdf-meta { color: #6b7385; font-size: 12px; }
-.pdf-sheet .pdf-foot { margin-top: 14px; padding-top: 6px; border-top: 1px solid #e2e5ea; color: #6b7385; font-size: 10px; word-break: break-all; }
-.pdf-sheet details > summary::after { display: none; }
-.pdf-sheet .pr-grid { grid-template-columns: 1fr 1fr; }
-.pdf-sheet a { color: #2f6fde; text-decoration: none; }
-/* html2canvas loses the spaces between Hebrew words; a tiny letter-spacing makes it place every character
-   from the browser's own layout (Hebrew letters don't join, so per-character drawing is exact) */
-.pdf-sheet, .pdf-sheet * { letter-spacing: 0.01px; }
+
+/* ---------- phone layout ---------- */
+.filters-toggle, .f-map { display: none; }
+@media (max-width: 760px) {
+  .filters-toggle {
+    display: block; order: -1; border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
+    padding: 6px 10px; font-size: 13px; color: var(--muted); white-space: nowrap;
+  }
+  /* row 1: filter toggle + search · row 2: layers + finder · row 3: dates + presets */
+  .search { flex: 1 1 calc(100% - 110px); }
+  .layers { flex: 1 1 auto; }
+  .finder-btn { flex: none; }
+  body.filters-hidden .layers, body.filters-hidden .dates, body.filters-hidden .finder-btn { display: none; }
+  /* date range and quick presets on one row */
+  .dates { display: flex; flex-wrap: nowrap; gap: 6px; width: 100%; }
+  .dates label { grid-column: auto; flex: 1 1 auto; min-width: 0; font-size: 0; }   /* hide the 📆 icon, keep the input */
+  .dates input.range { width: 100%; font-size: 11px; padding: 5px 1px; letter-spacing: -0.3px; }
+  .presets { flex: none; overflow-x: auto; }
+  .presets button { padding: 3px 7px; font-size: 11.5px; }
+  /* country panel and destination finder take the whole screen */
+  #panel, #finder {
+    position: fixed; inset: 0; width: auto; max-width: none; max-height: none;
+    border-radius: 0; z-index: 2500; padding-top: 14px;
+  }
+  #close { position: sticky; top: 0; z-index: 2; box-shadow: var(--shadow); width: 36px; height: 36px; }
+  .f-head { position: sticky; top: -14px; background: var(--surface); padding: 6px 0; z-index: 2; gap: 8px; }
+  .f-head h3 { flex: 1; }
+  .f-map { display: block; border: 1px solid var(--line); background: var(--accent-soft); color: var(--accent); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
+}

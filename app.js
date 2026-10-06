@@ -625,6 +625,16 @@ function drawLegend() {
   }
 }
 
+// phone: the filter rows can be collapsed (shown by default; the choice is remembered)
+function setFiltersHidden(hidden) {
+  document.body.classList.toggle('filters-hidden', hidden);
+  $('#filtersToggle').textContent = hidden ? '⚙️ סינון ▾' : '⚙️ סינון ▴';
+  try { localStorage.setItem('filtersHidden', hidden ? '1' : ''); } catch {}
+  setTimeout(() => map.invalidateSize(), 50);
+}
+$('#filtersToggle').addEventListener('click', () => setFiltersHidden(!document.body.classList.contains('filters-hidden')));
+try { if (localStorage.getItem('filtersHidden')) setFiltersHidden(true); } catch {}
+
 $('#legend').addEventListener('click', e => {
   const mode = e.target.closest('[data-mode]')?.dataset.mode;
   if (mode) { state.riskMode = mode; restyle(); drawLegend(); saveHash(); return; }
@@ -832,37 +842,27 @@ async function shareCountry(iso2) {
   try { await navigator.clipboard.writeText(url); toast('הדפדפן לא תומך בשיתוף ישיר – הקישור הועתק'); }
   catch { prompt('העתיקו את הקישור:', url); }
 }
-let html2pdfLoading;
-const loadHtml2pdf = () => (html2pdfLoading ||= new Promise((ok, fail) => {
-  const sc = document.createElement('script');
-  sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-  sc.onload = ok; sc.onerror = fail;
-  document.head.appendChild(sc);
-}));
+// The browser's own "Save as PDF" keeps real text (selectable, searchable) and handles Hebrew/RTL correctly,
+// unlike canvas-based PDF libraries.
 async function exportPdf(iso2) {
-  const name = nameHe(iso2, iso2);
-  toast('מכין PDF…', 15000);
-  try {
-    await loadHtml2pdf();
-    for (let i = 0; i < 25 && $('#panelBody .spinner'); i++) await new Promise(r => setTimeout(r, 300));   // let async sections finish
-    const sheet = document.createElement('div');
-    sheet.className = 'pdf-sheet';
-    sheet.dir = 'rtl';
-    sheet.innerHTML = `<div class="pdf-head"><div class="pdf-brand">🌍 מפת מטיילים</div>
-        <div class="pdf-meta">${dmy(state.from)} – ${dmy(state.to)} · הופק ב־${dmy(today())}</div></div>
-      ${$('#panelBody').innerHTML}
-      <div class="pdf-foot" dir="ltr">${esc(location.href)}</div>`;
-    sheet.querySelectorAll('.p-actions, button, details.how').forEach(n => n.remove());
-    sheet.querySelectorAll('details').forEach(d => { d.open = true; });
-    await html2pdf().set({
-      margin: [10, 10, 12, 10], filename: `${name} ${state.from} – מפת מטיילים.pdf`,
-      image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'], avoid: ['.card', '.pr-item', 'aside.note', 'tr', 'li'] },
-    }).from(sheet).save();
-    toast('ה־PDF נשמר');
-  } catch (e) { console.error(e); toast('יצירת ה־PDF נכשלה'); }
+  for (let i = 0; i < 25 && $('#panelBody .spinner'); i++) await new Promise(r => setTimeout(r, 300));   // let async sections finish
+  document.querySelector('.print-sheet')?.remove();
+  const sheet = document.createElement('div');
+  sheet.className = 'print-sheet';
+  sheet.dir = 'rtl';
+  sheet.innerHTML = `<div class="pdf-head"><div class="pdf-brand">🌍 מפת מטיילים</div>
+      <div class="pdf-meta">${dmy(state.from)} – ${dmy(state.to)} · הופק ב־${dmy(today())}</div></div>
+    ${$('#panelBody').innerHTML}
+    <div class="pdf-foot" dir="ltr">${esc(location.href)}</div>`;
+  sheet.querySelectorAll('.p-actions, button, details.how').forEach(n => n.remove());
+  sheet.querySelectorAll('details').forEach(d => { d.open = true; });
+  document.body.appendChild(sheet);
+  const title = document.title;
+  document.title = `${nameHe(iso2, iso2)} ${dmy(state.from)} – מפת מטיילים`;   // default PDF file name
+  const done = () => { document.title = title; sheet.remove(); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  toast('בחלון ההדפסה בחרו "שמירה כ־PDF"', 5000);
+  setTimeout(() => window.print(), 50);
 }
 
 function factsCard(iso2) {
@@ -1291,7 +1291,11 @@ function openFinder(open) {
     runFinder();
   } else { state.finder = null; finderMatches = new Set(); restyle(); }
 }
-$('#finderBtn').addEventListener('click', () => openFinder($('#finder').hidden));
+$('#finderBtn').addEventListener('click', () => {
+  if (state.finder && $('#finder').hidden) { $('#finder').hidden = false; document.body.classList.add('finder-open'); }  // minimised → show again
+  else openFinder($('#finder').hidden);
+});
+$('#fMap').addEventListener('click', () => { $('#finder').hidden = true; document.body.classList.remove('finder-open'); });
 $('#fClose').addEventListener('click', () => openFinder(false));
 $('#finder').addEventListener('change', runFinder);
 $('#fResults').addEventListener('click', e => {

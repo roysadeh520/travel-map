@@ -9,11 +9,12 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <!-- bump ?v= on every release so browsers don't keep a stale copy (GitHub Pages caches for 10 min) -->
-<link rel="stylesheet" href="style.css?v=2026100601">
+<link rel="stylesheet" href="style.css?v=2026100603">
 </head>
 <body>
 <header class="topbar">
   <h1>🌍 מפת מטיילים</h1>
+  <button id="filtersToggle" class="filters-toggle">⚙️ סינון ▴</button>
 
   <div class="search">
     <input id="q" type="search" autocomplete="off" placeholder="חפשו מדינה, עיר או כתובת…">
@@ -32,7 +33,7 @@
     <label>📆 <input id="range" class="range" placeholder="dd/mm/yyyy – dd/mm/yyyy" autocomplete="off"></label>
     <div class="presets">
       <button data-preset="week">השבוע</button>
-      <button data-preset="nextmonth">החודש הבא</button>
+      <button data-preset="nextmonth">חודש הבא</button>
       <button data-preset="december">דצמבר</button>
     </div>
   </div>
@@ -47,7 +48,7 @@
   </div>
   <div id="legend"></div>
   <div id="finder" hidden>
-    <div class="f-head"><h3>🎯 מאתר יעדים</h3><button id="fClose" title="סגירה">✕</button></div>
+    <div class="f-head"><h3>🎯 מאתר יעדים</h3><button id="fMap" class="f-map">🗺️ הצג במפה</button><button id="fClose" title="סגירה">✕</button></div>
     <div class="f-sub">לפי התאריכים שנבחרו למעלה</div>
     <label class="chk"><input type="checkbox" id="fTempOn" checked> טמפ׳ מקס׳
       <input type="number" id="fTmin" value="18" min="-30" max="45"> ל־<input type="number" id="fTmax" value="30" min="-30" max="45">°</label>
@@ -69,6 +70,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/he.min.js"></script>
-<script src="app.js?v=2026100601"></script>
+<script src="app.js?v=2026100603"></script>
 </body>
 </html>
