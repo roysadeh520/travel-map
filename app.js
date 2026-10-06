@@ -654,10 +654,18 @@ async function setLayer(layer) {
 }
 
 // ---------- panel ----------
+// Phones may still allow pinch-zoom (iOS ignores maximum-scale for that). Re-applying a slightly different viewport
+// value makes the browser snap back to the screen's own scale.
+function resetPageZoom() {
+  if (innerWidth > 760) return;
+  const meta = document.querySelector('meta[name=viewport]');
+  meta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0');
+  setTimeout(() => meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1'), 300);
+}
 async function selectCountry(iso2, { zoom = false, point = null } = {}) {
   const f = state.features[iso2];
   if (!f) return;
-  if (iso2 !== state.selected) $('#panel').scrollTop = 0;
+  if (iso2 !== state.selected) state.panelReset = true;   // applied once the panel is visible (see renderPanel)
   state.selected = iso2;
   state.point = point || repPoint(iso2);
   pointMarker.remove();
@@ -900,6 +908,15 @@ async function renderPanel() {
   const i = state.info[iso2];
   const pt = state.point;
   $('#panel').hidden = false;
+  if (state.panelReset) {
+    // a newly opened country starts at the top and at the screen's own zoom; this must run after the panel is
+    // shown, because a hidden element ignores scrollTop
+    state.panelReset = false;
+    resetPageZoom();
+    const toTop = () => { $('#panel').scrollTop = 0; window.scrollTo(0, 0); };
+    toTop();                          // the panel is displayed now, so this takes effect…
+    requestAnimationFrame(toTop);     // …and again after the new content is laid out
+  }
   $('#panelBody').innerHTML = `
     <div class="p-head">
       <img src="https://flagcdn.com/w160/${iso2.toLowerCase()}.png" alt="" onerror="this.remove()">
@@ -965,6 +982,7 @@ $('#panelBody').addEventListener('click', e => {
 });
 $('#close').addEventListener('click', () => {
   $('#panel').hidden = true; state.selected = null; pointMarker.remove(); restyle(); saveHash();
+  resetPageZoom();
 });
 
 // ---------- search ----------
