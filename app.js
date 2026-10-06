@@ -288,7 +288,27 @@ async function loadCitiesWx(iso2, token) {
 }
 
 // ---------- holidays ----------
+// Hebcal lists multi-day holidays one day at a time ("חנוכה: א׳ נר" … "חנוכה: יום ח׳"): merge consecutive days
+const holidayBase = h => h.split(':')[0].replace(/\s+[א-ת]{1,2}׳.*$/, '').replace(/\s*\(.*\)$/, '').trim();
+function mergeHolidays(list) {
+  const out = [];
+  for (const h of [...list].sort((a, b) => a.date.localeCompare(b.date))) {
+    const base = holidayBase(h.localName);
+    // another holiday may fall in between (e.g. חג הבנות during Hanukkah), so look at every open group
+    const g = out.find(o => o.base === base && daysBetween(o.end, h.date) <= 1);
+    if (g) g.end = h.date;
+    else out.push({ ...h, base, localName: base, name: h.name === h.localName ? base : h.name, end: h.date });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 async function holidays(iso2) {
+  // Nager.Date has no Israel: use Hebcal's Israeli holiday calendar (major + modern holidays)
+  if (iso2 === 'IL') {
+    const r = await getJSON(`https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&mod=on&i=on&lg=he&start=${state.from}&end=${state.to}`).catch(() => null);
+    if (!r) return null;
+    return mergeHolidays((r.items || []).filter(i => i.category === 'holiday').map(i => ({ date: i.date.slice(0, 10), localName: i.hebrew || i.title, name: i.hebrew || i.title })));
+  }
   const y0 = parse(state.from).getFullYear(), y1 = parse(state.to).getFullYear();
   const lists = await Promise.all([...new Set([y0, y1])].map(y =>
     getJSON(`https://date.nager.at/api/v3/PublicHolidays/${y}/${iso2}`).catch(() => null)));
@@ -752,19 +772,80 @@ async function fillShabbat(pt, tz, token) {
   const el = () => token === panelToken && $('#prShabbat');
   if (!pt || !tz) { if (el()) $('#prShabbat').querySelector('.spinner').textContent = 'אין נתונים'; return; }
   try {
-    const url = `https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&min=on&mod=on&ss=on&c=on&M=on&lg=he&geo=pos&latitude=${pt.lat.toFixed(3)}&longitude=${pt.lon.toFixed(3)}&tzid=${encodeURIComponent(tz)}&start=${state.from}&end=${state.to}`;
+    const url = `https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&min=on&mod=on&s=on&c=on&M=on&lg=he&geo=pos&latitude=${pt.lat.toFixed(3)}&longitude=${pt.lon.toFixed(3)}&tzid=${encodeURIComponent(tz)}&start=${state.from}&end=${state.to}`;
     const r = await getJSON(url);
     if (!el()) return;
-    const items = (r.items || []).filter(i => ['candles', 'havdalah', 'holiday'].includes(i.category));
-    const row = i => {
-      const d = i.date.slice(0, 10), time = i.date.length > 10 ? i.date.slice(11, 16) : '';
-      const label = i.category === 'candles' ? '🕯️ הדלקת נרות' : i.category === 'havdalah' ? '✨ הבדלה' : `✡ ${esc(i.hebrew || i.title)}`;
-      return `<li>${label}${time ? ` <b dir="ltr">${time}</b>` : ''} <small>${dayLabel(d)}</small></li>`;
+    const items = r.items || [];
+    const time = i => i.date.slice(11, 16), day = i => i.date.slice(0, 10);
+    // candle lighting = entry, havdalah = exit; pair each entry with the next exit
+    const entries = items.filter(i => i.category === 'candles'), exits = items.filter(i => i.category === 'havdalah');
+    const used = new Set(), rows = [];
+    for (const c of entries) {
+      const h = exits.find(x => !used.has(x) && x.date > c.date);
+      if (h) used.add(h);
+      rows.push({ start: c, end: h });
+    }
+    for (const h of exits) if (!used.has(h)) rows.push({ start: null, end: h });
+    rows.sort((a, b) => (a.start || a.end).date.localeCompare((b.start || b.end).date));
+    const rowHtml = ({ start, end }) => {
+      const ref = start || end, shabbat = start ? parse(day(start)).getDay() === 5 : parse(day(end)).getDay() === 6;
+      const parasha = shabbat && end ? items.find(i => i.category === 'parashat' && day(i) === day(end)) : null;
+      const title = shabbat ? `שבת${parasha ? ` · ${esc(parasha.hebrew || parasha.title)}` : ''}`
+        : esc(holidayBase(items.find(i => i.category === 'holiday' && day(i) >= day(ref))?.hebrew || 'חג'));
+      return `<li><b>${title}</b>
+        <div class="sh-times">${start ? `<span>כניסה <b dir="ltr">${time(start)}</b> <small>${dayLabel(day(start))}</small></span>` : ''}
+        ${end ? `<span>יציאה <b dir="ltr">${time(end)}</b> <small>${dayLabel(day(end))}</small></span>` : ''}</div></li>`;
     };
+    const hol = mergeHolidays(items.filter(i => i.category === 'holiday').map(i => ({ date: day(i), localName: i.hebrew || i.title, name: '' })));
     $('#prShabbat').innerHTML = `<h4>🕯️ שבת וחגים${pt.label ? ` · ${esc(pt.label)}` : ''}</h4>
-      ${items.length ? `<ul class="list compact">${items.map(row).join('')}</ul>` : '<div class="pr-line">אין שבת או חג בתאריכים שנבחרו</div>'}
-      <div class="meta">זמנים לפי <a href="https://www.hebcal.com" target="_blank" rel="noopener">Hebcal</a></div>`;
+      ${rows.length ? `<ul class="list compact">${rows.map(rowHtml).join('')}</ul>` : '<div class="pr-line">אין שבת בתאריכים שנבחרו</div>'}
+      ${hol.length ? `<div class="pr-line">✡ ${hol.map(h => `${esc(h.localName)} <small>${h.end !== h.date ? `${dmy(h.date)}–${dmy(h.end)}` : dmy(h.date)}</small>`).join(' · ')}</div>` : ''}
+      <div class="meta">כניסה: 18 דק׳ לפני השקיעה · יציאה: צאת הכוכבים · לפי <a href="https://www.hebcal.com" target="_blank" rel="noopener">Hebcal</a></div>`;
   } catch { if (el()) $('#prShabbat').querySelector('.spinner').textContent = 'לא הצלחנו לטעון זמני שבת'; }
+}
+
+// ---------- share / PDF ----------
+async function shareCountry(iso2) {
+  const name = nameHe(iso2, iso2), url = location.href;
+  const text = `${name} · ${dmy(state.from)}–${dmy(state.to)} · מפת מטיילים`;
+  if (navigator.share) {
+    try { await navigator.share({ title: `מפת מטיילים – ${name}`, text, url }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(url); toast('הדפדפן לא תומך בשיתוף ישיר – הקישור הועתק'); }
+  catch { prompt('העתיקו את הקישור:', url); }
+}
+let html2pdfLoading;
+const loadHtml2pdf = () => (html2pdfLoading ||= new Promise((ok, fail) => {
+  const sc = document.createElement('script');
+  sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+  sc.onload = ok; sc.onerror = fail;
+  document.head.appendChild(sc);
+}));
+async function exportPdf(iso2) {
+  const name = nameHe(iso2, iso2);
+  toast('מכין PDF…', 15000);
+  try {
+    await loadHtml2pdf();
+    for (let i = 0; i < 25 && $('#panelBody .spinner'); i++) await new Promise(r => setTimeout(r, 300));   // let async sections finish
+    const sheet = document.createElement('div');
+    sheet.className = 'pdf-sheet';
+    sheet.dir = 'rtl';
+    sheet.innerHTML = `<div class="pdf-head"><div class="pdf-brand">🌍 מפת מטיילים</div>
+        <div class="pdf-meta">${dmy(state.from)} – ${dmy(state.to)} · הופק ב־${dmy(today())}</div></div>
+      ${$('#panelBody').innerHTML}
+      <div class="pdf-foot" dir="ltr">${esc(location.href)}</div>`;
+    sheet.querySelectorAll('.p-actions, button, details.how').forEach(n => n.remove());
+    sheet.querySelectorAll('details').forEach(d => { d.open = true; });
+    await html2pdf().set({
+      margin: [10, 10, 12, 10], filename: `${name} ${state.from} – מפת מטיילים.pdf`,
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'], avoid: ['.card', '.pr-item', 'aside.note', 'tr', 'li'] },
+    }).from(sheet).save();
+    toast('ה־PDF נשמר');
+  } catch (e) { console.error(e); toast('יצירת ה־PDF נכשלה'); }
 }
 
 function factsCard(iso2) {
@@ -806,7 +887,8 @@ async function renderPanel() {
     </div>
     <div class="p-actions">
       <button data-act="zoom">🔍 התקרבו למדינה</button>
-      <button data-act="share">🔗 העתיקו קישור</button>
+      <button data-act="share">📤 שיתוף</button>
+      <button data-act="pdf">📄 הורדה כ־PDF</button>
     </div>
     ${riskCard(iso2)}
     ${nscNote(iso2)}
@@ -845,9 +927,12 @@ async function renderPanel() {
   holidays(iso2).then(list => {
     if (token !== panelToken) return;
     const body = list == null ? '<div class="empty">אין נתוני חגים למדינה זו במקור</div>'
-      : list.length ? `<ul class="list">${list.map(h => `<li>${esc(h.localName)}${h.localName !== h.name ? ` <small>${esc(h.name)} · ${dmy(h.date)}</small>` : ` <small>${dmy(h.date)}</small>`}</li>`).join('')}</ul>`
+      : list.length ? `<ul class="list">${list.map(h => {
+        const when = h.end && h.end !== h.date ? `${dmy(h.date)} – ${dmy(h.end)}` : dmy(h.date);
+        return `<li>${esc(h.localName)}${h.localName !== h.name ? ` <small>${esc(h.name)} · ${when}</small>` : ` <small>${when}</small>`}</li>`;
+      }).join('')}</ul>`
       : '<div class="empty">אין חגים רשמיים בתאריכים אלה</div>';
-    $('#holCard').innerHTML = `<h3>📅 חגים רשמיים</h3>${body}<div class="meta">Nager.Date</div>`;
+    $('#holCard').innerHTML = `<h3>📅 חגים רשמיים</h3>${body}<div class="meta">${iso2 === 'IL' ? 'Hebcal' : 'Nager.Date'}</div>`;
   });
 }
 
@@ -855,7 +940,8 @@ $('#panelBody').addEventListener('click', e => {
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'zoom') fitCountry(state.selected);
   if (act === 'jewish') showJewishFor(state.selected);
-  if (act === 'share') navigator.clipboard?.writeText(location.href).then(() => toast('הקישור הועתק'));
+  if (act === 'share') shareCountry(state.selected);
+  if (act === 'pdf') exportPdf(state.selected);
 });
 $('#close').addEventListener('click', () => {
   $('#panel').hidden = true; state.selected = null; pointMarker.remove(); restyle(); saveHash();

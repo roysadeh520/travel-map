@@ -372,3 +372,23 @@ ul.list.compact li { padding: 3px 0; font-size: 13px; }
 }
 body.finder-open #legend { display: none; }
 .map-label.region span { font-weight: 500; font-style: italic; color: #5b6475; }
+
+/* ---------- Shabbat times ---------- */
+.sh-times { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; font-size: 13px; }
+.sh-times small { color: var(--muted); }
+
+/* ---------- PDF export (html2pdf renders a detached copy of the panel) ---------- */
+.pdf-sheet {
+  width: 720px; background: #fff; color: #1d2433;
+  font-family: Heebo, sans-serif; font-size: 13px; padding: 4px 6px;
+}
+.pdf-sheet .pdf-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #2f6fde; padding-bottom: 6px; margin-bottom: 10px; }
+.pdf-sheet .pdf-brand { font-weight: 700; color: #2f6fde; font-size: 15px; }
+.pdf-sheet .pdf-meta { color: #6b7385; font-size: 12px; }
+.pdf-sheet .pdf-foot { margin-top: 14px; padding-top: 6px; border-top: 1px solid #e2e5ea; color: #6b7385; font-size: 10px; word-break: break-all; }
+.pdf-sheet details > summary::after { display: none; }
+.pdf-sheet .pr-grid { grid-template-columns: 1fr 1fr; }
+.pdf-sheet a { color: #2f6fde; text-decoration: none; }
+/* html2canvas loses the spaces between Hebrew words; a tiny letter-spacing makes it place every character
+   from the browser's own layout (Hebrew letters don't join, so per-character drawing is exact) */
+.pdf-sheet, .pdf-sheet * { letter-spacing: 0.01px; }
