@@ -654,13 +654,15 @@ async function setLayer(layer) {
 }
 
 // ---------- panel ----------
-// Phones may still allow pinch-zoom (iOS ignores maximum-scale for that). Re-applying a slightly different viewport
-// value makes the browser snap back to the screen's own scale.
+// Pinch-zoom stays allowed. To return to the screen's own scale when a country is opened or closed, the viewport
+// is capped at 100% for a moment (the browser zooms back out) and then released again.
+const VIEWPORT = 'width=device-width, initial-scale=1';
 function resetPageZoom() {
   if (innerWidth > 760) return;
+  if (window.visualViewport && visualViewport.scale <= 1.01) return;   // not zoomed – nothing to do
   const meta = document.querySelector('meta[name=viewport]');
-  meta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0');
-  setTimeout(() => meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1'), 300);
+  meta.setAttribute('content', `${VIEWPORT}, maximum-scale=1`);
+  setTimeout(() => meta.setAttribute('content', VIEWPORT), 400);
 }
 async function selectCountry(iso2, { zoom = false, point = null } = {}) {
   const f = state.features[iso2];
