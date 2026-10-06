@@ -587,9 +587,10 @@ function tooltipFor(p) {
 
 // event markers (visible on the events layer)
 const eventLayer = L.layerGroup();
-function drawEventMarkers() {
+function drawEventMarkers(only = null) {
   eventLayer.clearLayers();
   for (const e of eventsInRange(null)) {
+    if (only && !only.has(e.cc)) continue;
     L.marker([e.lat, e.lon], {
       icon: L.divIcon({ className: '', html: `<div style="font-size:22px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))">${CAT_ICON[e.cat] || '📍'}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
     }).bindPopup(`<b>${esc(e.name)}</b><br>${esc(e.city)}<br><small>${dmy(e.start)} – ${dmy(e.end)}${e.approx ? ' (משוער)' : ''}</small>`)
@@ -1260,24 +1261,39 @@ async function runFinder() {
     catch { $('#fResults').innerHTML = '<div class="empty">לא הצלחנו לטעון טמפרטורות. נסו שוב בעוד דקה.</div>'; return; }
     if (seq !== finderSeq || !state.finder) return;
   }
-  const hits = [];
+  // first failing criterion per country, so we can explain why countries with events were left out
+  const REASON = { risk: 'מדד סיכון', temp: 'טמפרטורה', visa: 'ויזה', jewish: 'קהילה יהודית' };
+  const failOf = (iso2, r, t) => {
+    if (!r || r.score >= f.risk) return 'risk';
+    if (f.tempOn && (t == null || t < f.tmin || t > f.tmax)) return 'temp';
+    if (f.visa && !visaOk(state.practical[iso2]?.visa)) return 'visa';
+    if (f.jewish && !(state.jewish?.counts?.[iso2] && (state.jewish.counts[iso2].s + state.jewish.counts[iso2].c) > 0)) return 'jewish';
+    return null;
+  };
+  const hits = [], eventFails = {};
+  let withEvents = 0;
   for (const iso2 of Object.keys(state.features)) {
     if (iso2 === 'IL' || iso2 === 'AQ') continue;
-    const r = riskOf(iso2), t = temps?.[iso2];
-    if (!r || r.score >= f.risk) continue;
-    if (f.tempOn && (t == null || t < f.tmin || t > f.tmax)) continue;
-    if (f.visa && !visaOk(state.practical[iso2]?.visa)) continue;
-    if (f.events && !eventsInRange(iso2).length) continue;
-    if (f.jewish && !(state.jewish?.counts?.[iso2] && (state.jewish.counts[iso2].s + state.jewish.counts[iso2].c) > 0)) continue;
-    hits.push({ iso2, r, t });
+    const r = riskOf(iso2), t = temps?.[iso2], ev = eventsInRange(iso2);
+    if (f.events && !ev.length) continue;
+    if (f.events) withEvents++;
+    const fail = failOf(iso2, r, t);
+    if (fail) { if (f.events) eventFails[fail] = (eventFails[fail] || 0) + 1; continue; }
+    hits.push({ iso2, r, t, ev });
   }
   // same risk level: bigger countries first (otherwise dozens of micro-states with a 0 score lead the list)
   hits.sort((a, b) => a.r.bucket - b.r.bucket || (state.info[b.iso2]?.pop || 0) - (state.info[a.iso2]?.pop || 0));
   finderMatches = new Set(hits.map(h => h.iso2));
   restyle();
-  $('#fResults').innerHTML = `<div class="f-count">${hits.length ? `נמצאו <b>${hits.length}</b> יעדים` : 'לא נמצאו יעדים – נסו להרחיב את הסינון'}</div>
+  // with the events filter on, show the matching countries' event markers on the map
+  if (f.events) { drawEventMarkers(finderMatches); eventLayer.addTo(map); }
+  else if (state.layer !== 'events') eventLayer.remove();
+  else drawEventMarkers();
+  const why = f.events && withEvents > hits.length
+    ? `<div class="f-why">מתוך ${withEvents} מדינות עם אירועים בתאריכים, נפסלו: ${Object.entries(eventFails).map(([k, n]) => `${n} בגלל ${REASON[k]}`).join(' · ')}</div>` : '';
+  $('#fResults').innerHTML = `<div class="f-count">${hits.length ? `נמצאו <b>${hits.length}</b> יעדים` : 'לא נמצאו יעדים – נסו להרחיב את הסינון'}</div>${why}
     <ul class="f-list">${hits.map(h => `<li data-iso="${h.iso2}">
-      <span>${esc(nameHe(h.iso2, h.iso2))}</span>
+      <span>${esc(nameHe(h.iso2, h.iso2))}${f.events ? `<small class="f-ev">${h.ev.map(e => `${CAT_ICON[e.cat] || ''} ${esc(e.name)}`).join(' · ')}</small>` : ''}</span>
       ${h.t != null ? `<span class="tchip" style="background:${tempColor(h.t)}">${Math.round(h.t)}°</span>` : ''}
       <span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span></li>`).join('')}</ul>`;
 }
@@ -1291,7 +1307,10 @@ function openFinder(open) {
     $('#fJewish').closest('label').title = state.jewish ? '' : 'נתוני הקהילה עדיין לא נבנו (מתעדכנים פעם בשבוע)';
     state.finder = readFinder();
     runFinder();
-  } else { state.finder = null; finderMatches = new Set(); restyle(); }
+  } else {
+    state.finder = null; finderMatches = new Set(); restyle();
+    if (state.layer === 'events') drawEventMarkers(); else eventLayer.remove();
+  }
 }
 $('#finderBtn').addEventListener('click', () => {
   if (state.finder && $('#finder').hidden) { $('#finder').hidden = false; document.body.classList.add('finder-open'); }  // minimised → show again
