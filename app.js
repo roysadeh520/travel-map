@@ -296,7 +296,7 @@ const map = L.map('map', {
 // whose street and place names are needed for addresses (country names are not shown that close anyway)
 const LABEL_MAX_ZOOM = 7;
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}', {
-  attribution: 'Tiles &copy; Esri', maxZoom: LABEL_MAX_ZOOM,
+  attribution: 'Tiles &copy; Esri', maxZoom: LABEL_MAX_ZOOM, className: 'base-terrain',
 }).addTo(map);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', minZoom: LABEL_MAX_ZOOM + 1, maxZoom: 19,

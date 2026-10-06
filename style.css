@@ -326,3 +326,6 @@ table.wx.cities tr:hover td { background: var(--accent-soft); }
   content: ''; position: absolute; right: 0; top: 50%; width: 5px; height: 5px; margin-top: -2.5px;
   border-radius: 50%; background: #3d4659; box-shadow: 0 0 0 1.5px #fff;
 }
+
+/* Esri terrain basemap recoloured towards OpenStreetMap's palette (turquoise sea -> light blue) */
+.base-terrain { filter: saturate(0.55) hue-rotate(18deg) sepia(0.1) brightness(0.98); }
