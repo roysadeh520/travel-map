@@ -292,9 +292,51 @@ const map = L.map('map', {
   zoomControl: true, minZoom: 2, maxZoom: 18, worldCopyJump: false,
   maxBounds: [[-85, -220], [85, 220]], maxBoundsViscosity: 0.8, preferCanvas: true,
 }).setView([30, 15], 2.5);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19,
+// Up to zoom 7 a label-free basemap with our own Hebrew labels on top; from zoom 8 OpenStreetMap,
+// whose street and place names are needed for addresses (country names are not shown that close anyway)
+const LABEL_MAX_ZOOM = 7;
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Tiles &copy; Esri', maxZoom: LABEL_MAX_ZOOM,
 }).addTo(map);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', minZoom: LABEL_MAX_ZOOM + 1, maxZoom: 19,
+}).addTo(map);
+
+// ---------- Hebrew labels ----------
+map.createPane('labels');
+map.getPane('labels').style.zIndex = 450;
+map.getPane('labels').style.pointerEvents = 'none';
+const labelLayer = L.layerGroup().addTo(map);
+let labelFeatures = [];
+function drawLabels() {
+  labelLayer.clearLayers();
+  const z = map.getZoom();
+  if (z > LABEL_MAX_ZOOM || !labelFeatures.length) return;
+  const view = map.getBounds().pad(0.15), placed = [];
+  // greedy placement in priority order; a label is skipped if its box overlaps one already placed
+  const place = (lat, lon, text, cls, px) => {
+    if (!view.contains([lat, lon])) return;
+    const p = map.latLngToContainerPoint([lat, lon]), w = text.length * px * 0.62 + 8, h = px + 6;
+    // country names are centred on their point; city names sit to the left of the city dot
+    const box = cls === 'city' ? [p.x - w, p.y - h / 2, p.x + 4, p.y + h / 2] : [p.x - w / 2, p.y - h / 2, p.x + w / 2, p.y + h / 2];
+    if (placed.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) return;
+    placed.push(box);
+    L.marker([lat, lon], { pane: 'labels', interactive: false, keyboard: false,
+      icon: L.divIcon({ className: `map-label ${cls}`, html: `<span style="font-size:${px}px">${esc(text)}</span>`, iconSize: [0, 0] }) }).addTo(labelLayer);
+  };
+  for (const f of labelFeatures) {
+    const p = f.properties;
+    if (p.minz > z + 1.5) continue;
+    const px = Math.round(Math.max(10, Math.min(18, 9 + z * 1.2 - (p.rank - 2) * 1.1)));
+    place(p.ly, p.lx, nameHe(p.iso2, p.he || p.en), 'country', px);
+  }
+  const minPop = z <= 3 ? Infinity : z === 4 ? 5e6 : z === 5 ? 2e6 : z === 6 ? 7e5 : 2.5e5;
+  for (const [he, , , lat, lon, pop] of state.cities) {
+    if (pop < minPop) break;   // sorted by population
+    place(lat, lon, he, 'city', z >= 6 ? 12 : 11);
+  }
+}
+map.on('zoomend moveend', drawLabels);
 
 // ---------- temperature heat map ----------
 // Grid points regular in *screen* space (snapped to a lat/lon lattice so panning reuses cached values) are fetched
@@ -961,8 +1003,10 @@ function readHash() {
   state.info = info;
   state.anti = anti.countries; state.antiMeta = anti._meta || {};
   state.events = events.events;
-  fetch('data/cities.json').then(r => r.json()).then(c => (state.cities = c)).catch(() => {});
+  fetch('data/cities.json').then(r => r.json()).then(c => { state.cities = c; drawLabels(); }).catch(() => {});
   for (const f of geo.features) if (f.properties.iso2 && !state.features[f.properties.iso2]) state.features[f.properties.iso2] = f;
+  labelFeatures = geo.features.filter(f => f.properties.iso2 && f.properties.lx != null)
+    .sort((a, b) => a.properties.rank - b.properties.rank || a.properties.minz - b.properties.minz);
   landFeatures = geo.features.filter(f => f.properties.iso2 !== 'AQ').map(f => {
     let x0 = 180, y0 = 90, x1 = -180, y1 = -90;
     const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
@@ -987,6 +1031,7 @@ function readHash() {
     },
   }).addTo(map);
   map.on('zoomend', restyle);
+  drawLabels();
 
   // old links used separate nsc / anti layers
   if (h.layer === 'nsc' || h.layer === 'anti') { h.mode = h.layer === 'anti' ? 'adl' : 'nsc'; h.layer = 'risk'; }

@@ -313,3 +313,16 @@ span.flatpickr-weekday { color: var(--muted); font-weight: 500; font-size: 12px;
 table.wx.cities tr { cursor: pointer; }
 table.wx.cities tr:hover td { background: var(--accent-soft); }
 .tchip { display: inline-block; min-width: 38px; text-align: center; border-radius: 6px; padding: 1px 6px; font-weight: 500; color: #1d2433; }
+
+/* ---------- Hebrew map labels ---------- */
+.map-label span {
+  position: absolute; transform: translate(-50%, -50%); white-space: nowrap; direction: rtl;
+  font-family: Heebo, sans-serif; color: #2b3345; line-height: 1;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff, 0 0 1px #fff;
+}
+.map-label.country span { font-weight: 700; letter-spacing: .2px; }
+.map-label.city span { font-weight: 500; color: #3d4659; padding-right: 9px; transform: translate(calc(-100% + 2.5px), -50%); }
+.map-label.city span::after {
+  content: ''; position: absolute; right: 0; top: 50%; width: 5px; height: 5px; margin-top: -2.5px;
+  border-radius: 50%; background: #3d4659; box-shadow: 0 0 0 1.5px #fff;
+}

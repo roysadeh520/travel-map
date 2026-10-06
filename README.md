@@ -19,6 +19,7 @@ python -m http.server 8765
 | מדד סיכון | 60% אזהרות מסע של המל"ל + 40% ADL Global 100 (01/2025) | המל"ל: יומי (`scripts/update-nsc.mjs`) |
 | מזג אוויר | Open-Meteo: מפת חום לפי רשת נקודות על המסך, מזג אוויר בנקודה שנלחצה וערים מרכזיות בכל מדינה (תחזית 16 יום, ממוצע 3 שנים מעבר לכך) | חי |
 | חגים | Nager.Date | חי |
+| מפת בסיס | עד זום 7: Esri World Terrain (בלי תוויות) עם שמות מדינות וערים בעברית מ־Natural Earth; מזום 8: OpenStreetMap | – |
 | חיפוש | מדינות וערים מקומיות (Natural Earth) + Photon + Nominatim | חי |
 | אירועים | `data/events.json` (ידני, תאריכים משוערים) | שנתי |
 | בתי כנסת / כשר | OpenStreetMap (Overpass) | חי |
