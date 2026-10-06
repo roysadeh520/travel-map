@@ -87,6 +87,11 @@ const state = {
   info: {},             // iso2 -> data/country-info.json record
   anti: {}, antiMeta: {},
   nsc: {}, nscMeta: {},
+  practical: {},        // data/practical.json: visa, emergency, plugs, voltage, driving side, missions
+  jewish: null,         // data/jewish-places.json (built weekly; optional)
+  practicalOpen: true,
+  finder: null,         // destination-finder criteria while its panel is open
+  ctemps: null,         // { key, temps } per-country temperature for the finder
   events: [],
   cities: [],           // [he, en, iso2, lat, lon, pop] — Natural Earth, for Hebrew search
 };
@@ -234,13 +239,14 @@ function nearestCity(lat, lon, maxKm = 60) {
 
 async function countryWeather(pt) {
   const plan = weatherPlan(state.from, state.to);
-  const daily = 'temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code';
+  const daily = 'temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code,sunrise,sunset,daylight_duration';
   const lat = pt.lat.toFixed(3), lon = pt.lon.toFixed(3);
   if (plan.kind !== 'estimate') {
     const r = await getJSON(wxURL(plan.kind === 'forecast' ? 'forecast' : 'archive', lat, lon, plan.from, plan.to, daily));
     return { plan, tz: r.timezone, days: r.daily.time.map((t, i) => ({
       date: t, hi: r.daily.temperature_2m_max[i], lo: r.daily.temperature_2m_min[i],
-      rain: r.daily.precipitation_sum[i], code: r.daily.weather_code[i] })) };
+      rain: r.daily.precipitation_sum[i], code: r.daily.weather_code[i],
+      sunrise: r.daily.sunrise?.[i], sunset: r.daily.sunset?.[i], daylight: r.daily.daylight_duration?.[i] })) };
   }
   // estimate: average of the same dates over the last 3 available years
   const years = [plan.shift, plan.shift - 1, plan.shift - 2];
@@ -252,7 +258,8 @@ async function countryWeather(pt) {
     const hi = avg(runs.map(r => r?.daily?.temperature_2m_max?.[i]));
     const lo = avg(runs.map(r => r?.daily?.temperature_2m_min?.[i]));
     const rain = avg(runs.map(r => r?.daily?.precipitation_sum?.[i]));
-    days.push({ date: addDays(plan.from, i), hi, lo, rain, code: rain >= 1 ? (lo < 1 ? 71 : 61) : 1 });
+    days.push({ date: addDays(plan.from, i), hi, lo, rain, code: rain >= 1 ? (lo < 1 ? 71 : 61) : 1,
+      sunrise: runs[0]?.daily?.sunrise?.[i], sunset: runs[0]?.daily?.sunset?.[i], daylight: runs[0]?.daily?.daylight_duration?.[i] });
   }
   return { plan, tz: runs[0]?.timezone, days };
 }
@@ -512,6 +519,10 @@ function styleFor(f) {
   const op = state.layer === 'temp' ? 0 : z >= 9 ? 0.12 : z >= 6 ? 0.35 : 0.72;
   // NSC "combined" warnings: fill = most of the country, dashed outline in the colour of the riskier regions
   const key = keyOf(f.properties), w = nscFor(key), fill = fillFor(key);
+  if (state.finder) {
+    const hit = finderMatches.has(key);
+    return { fillColor: hit ? '#2f6fde' : '#c9ced8', fillOpacity: hit ? 0.6 : 0.45, color: sel ? '#1d2433' : '#fff', weight: sel ? 2.5 : 0.7, dashArray: null };
+  }
   const mixed = state.layer === 'risk' && state.riskMode !== 'adl' && w?.mixed;
   if (sel) return { fillColor: fill, fillOpacity: op, color: '#1d2433', weight: 2.5, dashArray: null };
   if (mixed) return { fillColor: fill, fillOpacity: op, color: NSC[w.level].color, weight: 2, dashArray: '5 4' };
@@ -654,6 +665,104 @@ function nscNote(iso2) {
   </aside>`;
 }
 
+// ---------- practical info ----------
+const VISA = {
+  'visa free': ['פטור מוויזה', '#2e9e5b'], 'visa on arrival': ['ויזה בהגעה', '#8bb53c'], 'eta': ['אישור נסיעה אלקטרוני מראש (ETA / ESTA)', '#d9a400'],
+  'e-visa': ['ויזה אלקטרונית מראש', '#f2994a'], 'visa required': ['נדרשת ויזה מראש בנציגות', '#e0592a'], 'no admission': ['כניסה אסורה לבעלי דרכון ישראלי', '#b3261e'],
+};
+const visaOk = v => v && ['visa free', 'visa on arrival', 'eta'].includes(v.type);
+const ISRAELI_PLUG_FITS = ['C', 'E', 'F', 'H', 'J', 'K', 'L', 'N'];   // sockets that take a type C (Europlug) / H plug
+
+function visaItem(iso2) {
+  const v = state.practical[iso2]?.visa;
+  if (iso2 === 'IL') return '';
+  const [label, color] = v ? VISA[v.type] || [v.type, '#6b7385'] : ['אין מידע', '#6b7385'];
+  return `<div class="pr-item"><h4>🛂 ויזה לדרכון ישראלי</h4>
+    <span class="badge" style="background:${color}22;color:${darkText(color)}">● ${label}${v?.days ? ` · עד ${v.days} יום` : ''}</span>
+    <div class="meta">Passport Index · יש לאמת מול נציגות המדינה לפני הטיסה</div></div>`;
+}
+function communityItem(iso2) {
+  const c = state.jewish?.counts?.[iso2];
+  const body = !state.jewish ? '<div class="pr-line">בתי כנסת, בתי חב״ד ומסעדות כשרות לפי OpenStreetMap</div>'
+    : c ? `<div class="pr-line">🕍 ${c.s} בתי כנסת · <span class="chabad">✡</span> ${c.c} בתי חב״ד · 🍽️ ${c.k} מקומות כשרים</div>`
+    : '<div class="pr-line">לא נמצאו מקומות במפה הפתוחה (OpenStreetMap)</div>';
+  return `<div class="pr-item"><h4>🕍 קהילה יהודית</h4>${body}
+    <button class="linkbtn" data-act="jewish">הצג על המפה ←</button></div>`;
+}
+function emergencyItem(iso2) {
+  const p = state.practical[iso2] || {};
+  const nums = (p.emergency || []).map(n => `<a class="chip" href="tel:${n}" dir="ltr">${n}</a>`).join('');
+  const missions = (p.missions || []).map(m => `<li>${m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.name)}</a>` : esc(m.name)}${m.addr ? ` <small>${esc(m.addr)}</small>` : ''}</li>`).join('');
+  return `<div class="pr-item"><h4>🆘 חירום ונציגות ישראל</h4>
+    ${nums ? `<div class="pr-line">מספרי חירום מקומיים: ${nums}</div>` : '<div class="pr-line">אין מידע על מספרי חירום</div>'}
+    ${missions ? `<ul class="list compact">${missions}</ul>` : ''}
+    <a class="linkbtn" href="https://www.gov.il/he/collectors/embassies" target="_blank" rel="noopener">נציגויות ישראל בעולם (משרד החוץ) ←</a></div>`;
+}
+function powerItem(iso2) {
+  const p = state.practical[iso2] || {};
+  if (!p.plugs && !p.voltage && !p.drives) return '';
+  const fits = p.plugs?.some(t => ISRAELI_PLUG_FITS.includes(t));
+  return `<div class="pr-item"><h4>🔌 חשמל ונהיגה</h4>
+    ${p.plugs ? `<div class="pr-line">שקעים: <b dir="ltr">${p.plugs.join(', ')}</b>${p.voltage ? ` · ${p.voltage}V` : ''}</div>
+      <div class="pr-line">${fits ? '✅ תקע ישראלי / אירופי (C) נכנס' : '⚠️ צריך מתאם לתקע ישראלי'}${p.voltage && p.voltage < 150 ? ' · מתח נמוך: בדקו שהמכשיר תומך ב־110V' : ''}</div>` : ''}
+    ${p.drives ? `<div class="pr-line">${p.drives === 'left' ? '🚗 <b>נוהגים בצד שמאל</b> – בניגוד לישראל' : '🚗 נוהגים בצד ימין, כמו בישראל'}</div>` : ''}
+    <div class="meta">Wikidata</div></div>`;
+}
+function practicalSection(iso2) {
+  return `<details class="card practical" ${state.practicalOpen ? 'open' : ''}>
+    <summary><h3>🧳 מידע מעשי</h3></summary>
+    <div class="pr-grid">
+      <div class="pr-item" id="prShabbat"><h4>🕯️ שבת וחגים</h4><div class="spinner">טוען…</div></div>
+      ${visaItem(iso2)}
+      ${communityItem(iso2)}
+      <div class="pr-item" id="prMoney"><h4>💱 מטבע</h4><div class="spinner">טוען…</div></div>
+      ${emergencyItem(iso2)}
+      <div class="pr-item" id="prDaylight"><h4>🌅 שעות אור</h4><div class="spinner">טוען…</div></div>
+      ${powerItem(iso2)}
+    </div>
+  </details>`;
+}
+async function fillMoney(iso2, token) {
+  const el = () => token === panelToken && $('#prMoney');
+  const codes = Object.keys(state.info[iso2]?.currencies || {}).filter(c => c !== 'ILS');
+  if (!codes.length) { if (el()) $('#prMoney').innerHTML = '<h4>💱 מטבע</h4><div class="pr-line">שקל חדש (₪)</div>'; return; }
+  try {
+    const r = await getJSON('https://open.er-api.com/v6/latest/ILS');
+    if (!el()) return;
+    const fmt = n => n >= 100 ? Math.round(n).toLocaleString('he-IL') : n.toLocaleString('he-IL', { maximumFractionDigits: n < 1 ? 3 : 2 });
+    const lines = codes.filter(c => r.rates?.[c]).map(c => `<div class="pr-line"><b dir="ltr">100 ₪ ≈ ${fmt(100 * r.rates[c])} ${c}</b> · <span dir="ltr">1 ${c} ≈ ${fmt(1 / r.rates[c])} ₪</span></div>`);
+    $('#prMoney').innerHTML = `<h4>💱 מטבע</h4>${lines.join('') || '<div class="pr-line">אין שער למטבע זה</div>'}
+      <div class="meta">שער יומי · <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a></div>`;
+  } catch { if (el()) $('#prMoney').querySelector('.spinner').textContent = 'לא הצלחנו לטעון שער מטבע'; }
+}
+function fillDaylight(days, label, token) {
+  if (token !== panelToken || !$('#prDaylight')) return;
+  const withSun = days.filter(d => d.sunrise && d.sunset);
+  const t = s => s.slice(11, 16), hrs = sec => `${Math.floor(sec / 3600)}:${String(Math.round(sec % 3600 / 60)).padStart(2, '0')}`;
+  const line = d => `<div class="pr-line">${dayLabel(d.date)}: <b dir="ltr">${t(d.sunrise)}–${t(d.sunset)}</b>${d.daylight ? ` · ${hrs(d.daylight)} שעות אור` : ''}</div>`;
+  $('#prDaylight').innerHTML = `<h4>🌅 שעות אור${label ? ` · ${esc(label)}` : ''}</h4>
+    ${withSun.length ? line(withSun[0]) + (withSun.length > 1 ? line(withSun[withSun.length - 1]) : '') : '<div class="pr-line">אין נתונים</div>'}
+    <div class="meta">זריחה ושקיעה בשעון המקומי</div>`;
+}
+async function fillShabbat(pt, tz, token) {
+  const el = () => token === panelToken && $('#prShabbat');
+  if (!pt || !tz) { if (el()) $('#prShabbat').querySelector('.spinner').textContent = 'אין נתונים'; return; }
+  try {
+    const url = `https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&min=on&mod=on&ss=on&c=on&M=on&lg=he&geo=pos&latitude=${pt.lat.toFixed(3)}&longitude=${pt.lon.toFixed(3)}&tzid=${encodeURIComponent(tz)}&start=${state.from}&end=${state.to}`;
+    const r = await getJSON(url);
+    if (!el()) return;
+    const items = (r.items || []).filter(i => ['candles', 'havdalah', 'holiday'].includes(i.category));
+    const row = i => {
+      const d = i.date.slice(0, 10), time = i.date.length > 10 ? i.date.slice(11, 16) : '';
+      const label = i.category === 'candles' ? '🕯️ הדלקת נרות' : i.category === 'havdalah' ? '✨ הבדלה' : `✡ ${esc(i.hebrew || i.title)}`;
+      return `<li>${label}${time ? ` <b dir="ltr">${time}</b>` : ''} <small>${dayLabel(d)}</small></li>`;
+    };
+    $('#prShabbat').innerHTML = `<h4>🕯️ שבת וחגים${pt.label ? ` · ${esc(pt.label)}` : ''}</h4>
+      ${items.length ? `<ul class="list compact">${items.map(row).join('')}</ul>` : '<div class="pr-line">אין שבת או חג בתאריכים שנבחרו</div>'}
+      <div class="meta">זמנים לפי <a href="https://www.hebcal.com" target="_blank" rel="noopener">Hebcal</a></div>`;
+  } catch { if (el()) $('#prShabbat').querySelector('.spinner').textContent = 'לא הצלחנו לטעון זמני שבת'; }
+}
+
 function factsCard(iso2) {
   const i = state.info[iso2];
   if (!i) return `<section class="card"><h3>ℹ️ פרטים כלליים</h3><div class="empty">אין נתונים</div></section>`;
@@ -700,12 +809,18 @@ async function renderPanel() {
     <div class="daterange">📆 ${dmy(state.from)} – ${dmy(state.to)}</div>
     <section class="card" id="holCard"><h3>📅 חגים רשמיים</h3><div class="spinner">טוען…</div></section>
     ${eventsCard(iso2)}
+    ${practicalSection(iso2)}
     ${factsCard(iso2)}
     <section class="card" id="wxCard"><h3>🌤️ מזג אוויר${pt?.label ? ` · ${esc(pt.label)}` : ''}</h3><div class="spinner">טוען…</div></section>`;
 
   // weather
+  fillMoney(iso2, token);
+  $('#panelBody .practical')?.addEventListener('toggle', e => { state.practicalOpen = e.target.open; });
+  if (!pt) { fillShabbat(null, null, token); fillDaylight([], '', token); }
   if (pt) countryWeather(pt).then(({ plan, tz, days }) => {
     if (token !== panelToken) return;
+    fillShabbat(pt, tz, token);
+    fillDaylight(days, pt.label, token);
     if (tz && $('#localTime')) try { $('#localTime').textContent = new Intl.DateTimeFormat('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: tz }).format(new Date()); } catch {}
     const hi = avg(days.map(d => d.hi)), lo = avg(days.map(d => d.lo));
     const rainy = days.filter(d => d.rain >= 1).length;
@@ -735,6 +850,7 @@ async function renderPanel() {
 $('#panelBody').addEventListener('click', e => {
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'zoom') fitCountry(state.selected);
+  if (act === 'jewish') showJewishFor(state.selected);
   if (act === 'share') navigator.clipboard?.writeText(location.href).then(() => toast('הקישור הועתק'));
 });
 $('#close').addEventListener('click', () => {
@@ -864,6 +980,7 @@ async function datesChanged() {
   if (state.layer === 'temp') loadHeat();
   if (state.layer === 'events') drawEventMarkers();
   restyle(); drawLegend(); saveHash();
+  runFinder();
   if (state.selected) renderPanel();
 }
 // one range picker, shown and typed as dd/mm/yyyy
@@ -932,11 +1049,7 @@ $('#locate').addEventListener('click', () => {
 // Jewish community layer: synagogues + kosher food from OpenStreetMap (Overpass)
 const jewishLayer = L.layerGroup();
 let jewishOn = false, jewishTimer;
-$('#jewish').addEventListener('click', () => {
-  jewishOn = !jewishOn;
-  $('#jewish').classList.toggle('on', jewishOn);
-  if (jewishOn) { jewishLayer.addTo(map); loadJewish(); } else { jewishLayer.remove(); }
-});
+$('#jewish').addEventListener('click', () => setJewish(!jewishOn));
 map.on('moveend', () => { if (jewishOn) { clearTimeout(jewishTimer); jewishTimer = setTimeout(loadJewish, 700); } });
 // the public Overpass servers are often busy — try a few mirrors in turn
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
@@ -950,7 +1063,33 @@ async function overpass(query) {
   }
   throw lastErr;
 }
+const JEWISH_KIND = { s: ['🕍', 'בית כנסת', '#2f6fde'], c: ['✡', 'בית חב״ד', '#7c3aed'], k: ['🍽️', 'אוכל כשר', '#16a34a'] };
+function setJewish(on) {
+  jewishOn = on;
+  $('#jewish').classList.toggle('on', on);
+  if (on) { jewishLayer.addTo(map); loadJewish(); } else jewishLayer.remove();
+}
+function showJewishFor(iso2) {
+  if (state.jewish) fitCountry(iso2);
+  else if (state.point) map.flyTo([state.point.lat, state.point.lon], 12, { duration: 0.8 });
+  setJewish(true);
+}
+function drawJewishStatic() {
+  const z = map.getZoom();
+  if (z < 5) { jewishLayer.clearLayers(); toast('🕍 התקרבו למדינה כדי לראות בתי כנסת, בתי חב״ד ומסעדות כשרות'); return; }
+  const b = map.getBounds().pad(0.1), pts = state.jewish.places.filter(p => b.contains([p[0], p[1]]));
+  jewishLayer.clearLayers();
+  for (const [lat, lon, kind, name, , id] of pts.slice(0, 2500)) {
+    const [icon, label, color] = JEWISH_KIND[kind];
+    const osm = { n: 'node', w: 'way', r: 'relation' }[id[0]] + '/' + id.slice(1);
+    L.circleMarker([lat, lon], { radius: z >= 10 ? 7 : 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 1 })
+      .bindPopup(`<b>${icon} ${esc(name || label)}</b><br><small>${label}</small><br><a href="https://www.openstreetmap.org/${osm}" target="_blank" rel="noopener">פתיחה ב־OpenStreetMap</a>`)
+      .addTo(jewishLayer);
+  }
+  if (pts.length > 2500) toast(`מוצגים 2,500 מתוך ${pts.length.toLocaleString('he-IL')} מקומות – התקרבו לפירוט`);
+}
 async function loadJewish() {
+  if (state.jewish) return drawJewishStatic();
   if (map.getZoom() < 10) { toast('🕍 התקרבו לעיר (זום 10 ומעלה) כדי לראות בתי כנסת ומסעדות כשרות'); return; }
   const b = map.getBounds();
   const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map(n => n.toFixed(3)).join(',');
@@ -975,6 +1114,84 @@ async function loadJewish() {
   } catch (e) { console.error(e); toast('טעינת המקומות נכשלה (Overpass עמוס). נסו שוב.'); }
 }
 
+// ---------- destination finder ----------
+let finderMatches = new Set();
+async function loadCountryTemps() {
+  const key = `${state.from}_${state.to}`;
+  if (state.ctemps?.key === key) return state.ctemps.temps;
+  const plan = weatherPlan(state.from, state.to);
+  const kind = plan.kind === 'forecast' ? 'forecast' : 'archive';
+  const from = plan.kind === 'estimate' ? shiftYears(plan.from, plan.shift) : plan.from;
+  const to = plan.kind === 'estimate' ? shiftYears(plan.to, plan.shift) : plan.to;
+  const pts = Object.keys(state.features).map(c => ({ c, p: repPoint(c) })).filter(x => x.p);
+  const temps = {};
+  for (let i = 0; i < pts.length; i += 80) {
+    const chunk = pts.slice(i, i + 80);
+    let res = await getJSON(wxURL(kind, chunk.map(x => x.p.lat.toFixed(2)).join(','), chunk.map(x => x.p.lon.toFixed(2)).join(','), from, to, 'temperature_2m_max'));
+    if (!Array.isArray(res)) res = [res];
+    res.forEach((r, j) => { temps[chunk[j].c] = avg(r?.daily?.temperature_2m_max || []); });
+  }
+  state.ctemps = { key, temps };
+  return temps;
+}
+function readFinder() {
+  return {
+    tempOn: $('#fTempOn').checked, tmin: +$('#fTmin').value, tmax: +$('#fTmax').value, risk: +$('#fRisk').value,
+    visa: $('#fVisa').checked, events: $('#fEvents').checked, jewish: $('#fJewish').checked,
+  };
+}
+let finderSeq = 0;
+async function runFinder() {
+  if (!state.finder) return;
+  const f = state.finder = readFinder(), seq = ++finderSeq;
+  let temps = null;
+  if (f.tempOn) {
+    $('#fResults').innerHTML = '<div class="spinner">טוען טמפרטורות לכל המדינות…</div>';
+    try { temps = await loadCountryTemps(); }
+    catch { $('#fResults').innerHTML = '<div class="empty">לא הצלחנו לטעון טמפרטורות. נסו שוב בעוד דקה.</div>'; return; }
+    if (seq !== finderSeq || !state.finder) return;
+  }
+  const hits = [];
+  for (const iso2 of Object.keys(state.features)) {
+    if (iso2 === 'IL' || iso2 === 'AQ') continue;
+    const r = riskOf(iso2), t = temps?.[iso2];
+    if (!r || r.score >= f.risk) continue;
+    if (f.tempOn && (t == null || t < f.tmin || t > f.tmax)) continue;
+    if (f.visa && !visaOk(state.practical[iso2]?.visa)) continue;
+    if (f.events && !eventsInRange(iso2).length) continue;
+    if (f.jewish && !(state.jewish?.counts?.[iso2] && (state.jewish.counts[iso2].s + state.jewish.counts[iso2].c) > 0)) continue;
+    hits.push({ iso2, r, t });
+  }
+  // same risk level: bigger countries first (otherwise dozens of micro-states with a 0 score lead the list)
+  hits.sort((a, b) => a.r.bucket - b.r.bucket || (state.info[b.iso2]?.pop || 0) - (state.info[a.iso2]?.pop || 0));
+  finderMatches = new Set(hits.map(h => h.iso2));
+  restyle();
+  $('#fResults').innerHTML = `<div class="f-count">${hits.length ? `נמצאו <b>${hits.length}</b> יעדים` : 'לא נמצאו יעדים – נסו להרחיב את הסינון'}</div>
+    <ul class="f-list">${hits.map(h => `<li data-iso="${h.iso2}">
+      <span>${esc(nameHe(h.iso2, h.iso2))}</span>
+      ${h.t != null ? `<span class="tchip" style="background:${tempColor(h.t)}">${Math.round(h.t)}°</span>` : ''}
+      <span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span></li>`).join('')}</ul>`;
+}
+function openFinder(open) {
+  $('#finder').hidden = !open;
+  document.body.classList.toggle('finder-open', open);
+  $('#finderBtn').classList.toggle('on', open);
+  if (open) {
+    if (state.layer === 'temp') setLayer('risk');
+    $('#fJewish').disabled = !state.jewish;
+    $('#fJewish').closest('label').title = state.jewish ? '' : 'נתוני הקהילה עדיין לא נבנו (מתעדכנים פעם בשבוע)';
+    state.finder = readFinder();
+    runFinder();
+  } else { state.finder = null; finderMatches = new Set(); restyle(); }
+}
+$('#finderBtn').addEventListener('click', () => openFinder($('#finder').hidden));
+$('#fClose').addEventListener('click', () => openFinder(false));
+$('#finder').addEventListener('change', runFinder);
+$('#fResults').addEventListener('click', e => {
+  const iso = e.target.closest('[data-iso]')?.dataset.iso;
+  if (iso) selectCountry(iso, { zoom: true });
+});
+
 // ---------- URL hash (shareable state) ----------
 function saveHash() {
   const h = new URLSearchParams({ layer: state.layer, from: state.from, to: state.to });
@@ -992,13 +1209,16 @@ function readHash() {
   const h = readHash();
   setDates(h.from || today(), h.to || addDays(h.from || today(), 6), { silent: true });
 
-  const [geo, anti, events, info, nsc] = await Promise.all([
+  const [geo, anti, events, info, nsc, practical] = await Promise.all([
     fetch('data/countries.geojson').then(r => r.json()),
     fetch('data/antisemitism.json').then(r => r.json()),
     fetch('data/events.json').then(r => r.json()),
     fetch('data/country-info.json').then(r => r.json()),
     fetch('data/nsc-warnings.json').then(r => r.json()),
+    fetch('data/practical.json').then(r => (r.ok ? r.json() : null)).catch(() => null),
   ]);
+  state.practical = practical?.countries || {};
+  fetch('data/jewish-places.json').then(r => (r.ok ? r.json() : null)).then(j => { if (j?.places) state.jewish = j; }).catch(() => {});
   state.nsc = nsc.countries; state.nscMeta = nsc._meta || {};
   state.info = info;
   state.anti = anti.countries; state.antiMeta = anti._meta || {};

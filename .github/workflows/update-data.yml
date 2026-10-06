@@ -1,9 +1,16 @@
-# Refreshes data/nsc-warnings.json from gov.il every day and commits it if anything changed.
-name: Update NSC travel warnings
+# Refreshes the data files and commits them if anything changed:
+#   daily  – NSC travel warnings (gov.il)
+#   weekly – practical info (visa, emergency numbers, plugs…) and Jewish places (OpenStreetMap)
+name: Update data
 on:
   schedule:
-    - cron: '0 4 * * *'   # 07:00 Israel time
+    - cron: '0 4 * * *'   # every day, 07:00 Israel time
   workflow_dispatch:
+    inputs:
+      weekly:
+        description: 'Also run the weekly updates'
+        type: boolean
+        default: true
 permissions:
   contents: write
 jobs:
@@ -14,10 +21,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node scripts/update-nsc.mjs
-      - run: |
+      - name: NSC travel warnings
+        run: node scripts/update-nsc.mjs
+      - name: Practical info (Sundays or manual)
+        continue-on-error: true
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.weekly }}" = "true" ] || [ "$(date -u +%u)" = "7" ]; then node scripts/update-practical.mjs; fi
+      - name: Jewish places (Sundays or manual)
+        continue-on-error: true
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.weekly }}" = "true" ] || [ "$(date -u +%u)" = "7" ]; then node scripts/update-jewish.mjs; fi
+      - name: Commit
+        run: |
           git config user.name "data-bot"
           git config user.email "data-bot@users.noreply.github.com"
-          git add data/nsc-warnings.json
-          git diff --cached --quiet || git commit -m "Update NSC travel warnings"
+          git add data/*.json
+          git diff --cached --quiet || git commit -m "Update data"
           git push
