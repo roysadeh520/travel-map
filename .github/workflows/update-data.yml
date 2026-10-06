@@ -22,6 +22,8 @@ jobs:
         with:
           node-version: 22
       - name: NSC travel warnings
+        # gov.il currently blocks GitHub's data-centre IPs (HTTP 403); run scripts/update-nsc.mjs locally instead
+        continue-on-error: true
         run: node scripts/update-nsc.mjs
       - name: Practical info (Sundays or manual)
         continue-on-error: true
