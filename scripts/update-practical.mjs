@@ -24,7 +24,7 @@ try {
   let n = 0;
   for (const line of csv.split('\n')) {
     const [from, to, req] = line.trim().split(',');
-    if (from !== 'IL' || !to || req === '-1') continue;
+    if (from !== 'IL' || !to || to === 'PS' || req === '-1') continue;   // the map has no 'Palestine' entity
     const days = /^\d+$/.test(req) ? +req : null;
     C(to).visa = days ? { type: 'visa free', days } : { type: req };
     n++;
@@ -47,6 +47,7 @@ try {
       OPTIONAL { ?c wdt:P1622 ?sideI . ?sideI rdfs:label ?sideL . FILTER(LANG(?sideL) = "en") }
     } GROUP BY ?iso`);
   for (const r of rows) {
+    if (r.iso.value === 'PS') continue;
     const c = C(r.iso.value);
     const em = (r.emergency?.value || '').split('|').filter(x => /^[\d*#]{2,5}$/.test(x));
     if (em.length) c.emergency = [...new Set(em)].sort((a, b) => a.length - b.length || a.localeCompare(b));

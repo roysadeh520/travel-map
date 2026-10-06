@@ -13,12 +13,6 @@
   ]
  },
  "countries": {
-  "PS": {
-   "level": 4,
-   "range": "81–100%",
-   "source": "ADL Global 100 (2025)",
-   "updated": "2025-01"
-  },
   "VN": {
    "level": 1,
    "range": "21–40%",

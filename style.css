@@ -371,3 +371,4 @@ ul.list.compact li { padding: 3px 0; font-size: 13px; }
   #finder { left: 8px; right: 8px; width: auto; top: 8px; max-height: 55%; }
 }
 body.finder-open #legend { display: none; }
+.map-label.region span { font-weight: 500; font-style: italic; color: #5b6475; }

@@ -127,7 +127,9 @@ const ltr = s => `<bdi dir="ltr">${s}</bdi>`;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // ---------- country helpers ----------
+const AREA_NAMES = { GAZ: 'רצועת עזה' };
 function nameHe(iso2, fallback) {
+  if (AREA_NAMES[iso2]) return AREA_NAMES[iso2];
   try { const n = iso2 && heNames.of(iso2); if (n && n !== iso2) return n; } catch {}
   return fallback;
 }
@@ -315,6 +317,7 @@ map.getPane('labels').style.zIndex = 450;
 map.getPane('labels').style.pointerEvents = 'none';
 const labelLayer = L.layerGroup().addTo(map);
 let labelFeatures = [];
+const REGION_LABELS = [{ he: 'יהודה ושומרון', lat: 31.95, lon: 35.27, minz: 6 }];
 function drawLabels() {
   labelLayer.clearLayers();
   const z = map.getZoom();
@@ -335,8 +338,9 @@ function drawLabels() {
     const p = f.properties;
     if (p.minz > z + 1.5) continue;
     const px = Math.round(Math.max(10, Math.min(18, 9 + z * 1.2 - (p.rank - 2) * 1.1)));
-    place(p.ly, p.lx, nameHe(p.iso2, p.he || p.en), 'country', px);
+    place(p.ly, p.lx, nameHe(p.iso2 || p.a3, p.he || p.en), p.iso2 ? 'country' : 'region', p.iso2 ? px : 11);
   }
+  for (const r of REGION_LABELS) if (z >= r.minz) place(r.lat, r.lon, r.he, 'region', 11);
   const minPop = z <= 3 ? Infinity : z === 4 ? 5e6 : z === 5 ? 2e6 : z === 6 ? 7e5 : 2.5e5;
   for (const [he, , , lat, lon, pop] of state.cities) {
     if (pop < minPop) break;   // sorted by population
@@ -1225,7 +1229,7 @@ function readHash() {
   state.events = events.events;
   fetch('data/cities.json').then(r => r.json()).then(c => { state.cities = c; drawLabels(); }).catch(() => {});
   for (const f of geo.features) if (f.properties.iso2 && !state.features[f.properties.iso2]) state.features[f.properties.iso2] = f;
-  labelFeatures = geo.features.filter(f => f.properties.iso2 && f.properties.lx != null)
+  labelFeatures = geo.features.filter(f => (f.properties.iso2 || AREA_NAMES[f.properties.a3]) && f.properties.lx != null)
     .sort((a, b) => a.properties.rank - b.properties.rank || a.properties.minz - b.properties.minz);
   landFeatures = geo.features.filter(f => f.properties.iso2 !== 'AQ').map(f => {
     let x0 = 180, y0 = 90, x1 = -180, y1 = -90;
