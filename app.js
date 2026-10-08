@@ -188,15 +188,16 @@ const WX = c => c == null ? ['', ''] :
   c <= 77 ? ['🌨️', 'שלג'] : c <= 82 ? ['🌧️', 'ממטרים'] : c <= 86 ? ['🌨️', 'ממטרי שלג'] : ['⛈️', 'סופות רעמים'];
 const avg = a => { const v = a.filter(x => x != null); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
 
-// daily max / min / rain for several points in one request; beyond the forecast horizon: 3-year average
+// daily max / min / rain for several points in one request; beyond the forecast horizon: the same dates last year
+// (the panel, the finder and the heat map all use this, so their numbers agree; a multi-year average would
+// triple the calls and break Open-Meteo's free limit of 600 locations a minute for the finder)
 async function wxSeries(points, daily = 'temperature_2m_max,temperature_2m_min,precipitation_sum') {
   const plan = weatherPlan(state.from, state.to);
   const lats = points.map(p => p.lat.toFixed(2)).join(','), lons = points.map(p => p.lon.toFixed(2)).join(',');
   const asList = r => (Array.isArray(r) ? r : [r]);
-  const runs = plan.kind === 'estimate'
-    ? await Promise.all([plan.shift, plan.shift - 1, plan.shift - 2].map(n =>
-        getJSON(wxURL('archive', lats, lons, shiftYears(plan.from, n), shiftYears(plan.to, n), daily)).then(asList)))
-    : [asList(await getJSON(wxURL(plan.kind === 'forecast' ? 'forecast' : 'archive', lats, lons, plan.from, plan.to, daily)))];
+  const from = plan.kind === 'estimate' ? shiftYears(plan.from, plan.shift) : plan.from;
+  const to = plan.kind === 'estimate' ? shiftYears(plan.to, plan.shift) : plan.to;
+  const runs = [asList(await getJSON(wxURL(plan.kind === 'forecast' ? 'forecast' : 'archive', lats, lons, from, to, daily)))];
   const len = daysBetween(plan.from, plan.to) + 1;
   return points.map((_, k) => {
     const days = [];
@@ -259,8 +260,8 @@ async function countryWeather(pt) {
       rain: r.daily.precipitation_sum[i], code: r.daily.weather_code[i],
       sunrise: r.daily.sunrise?.[i], sunset: r.daily.sunset?.[i], daylight: r.daily.daylight_duration?.[i] })) };
   }
-  // estimate: average of the same dates over the last 3 available years
-  const years = [plan.shift, plan.shift - 1, plan.shift - 2];
+  // estimate: the same dates last year (as in wxSeries)
+  const years = [plan.shift];
   const runs = await Promise.all(years.map(n =>
     getJSON(wxURL('archive', lat, lon, shiftYears(plan.from, n), shiftYears(plan.to, n), daily))));
   const len = daysBetween(plan.from, plan.to) + 1;
@@ -629,7 +630,8 @@ function drawLegend() {
     L_.innerHTML = `<h4>מדד סיכון ליהודים וישראלים</h4>${seg}${body}`;
   } else if (state.layer === 'temp') {
     const ticks = [-20, -10, 0, 10, 20, 30, 40];
-    L_.innerHTML = `<h4>טמפרטורה מקסימלית ממוצעת</h4>
+    L_.innerHTML = `<h4>🌡️ כמה חם ביום?</h4>
+      <div class="sub" style="margin:0 0 4px">הצבע מראה את הטמפ׳ המקסימלית (בשעות היום), בממוצע לתאריכים שנבחרו:</div>
       <div class="tbar" style="background:linear-gradient(to right, ${ticks.map(t => tempColor(t)).join(', ')})"></div>
       <div class="tticks">${ticks.map(t => `<span>${t}°</span>`).join('')}</div>
       <div class="sub">רשת נקודות לפי האזור שעל המסך – התקרבו לפירוט. לחיצה על מדינה מציגה מזג אוויר בנקודה.${heat.estimate ? '<br>הערכה לפי אותם תאריכים בשנה הקודמת (מעבר לטווח התחזית).' : ''}</div>`;
@@ -770,9 +772,9 @@ function visaItem(iso2) {
   const v = state.practical[iso2]?.visa;
   if (iso2 === 'IL') return '';
   const [label, color] = v ? VISA[v.type] || [v.type, '#6b7385'] : ['אין מידע', '#6b7385'];
-  return `<div class="pr-item"><h4>🛂 ויזה לדרכון ישראלי</h4>
+  return `<section class="card"><h3>🛂 ויזה לדרכון ישראלי</h3>
     <span class="badge" style="background:${color}22;color:${darkText(color)}">● ${label}${v?.days ? ` · עד ${v.days} יום` : ''}</span>
-    <div class="meta">Passport Index · יש לאמת מול נציגות המדינה לפני הטיסה</div></div>`;
+    <div class="meta">Passport Index · יש לאמת מול נציגות המדינה לפני הטיסה</div></section>`;
 }
 function communityItem(iso2) {
   return `<div class="pr-item"><h4>🕍 קהילה יהודית</h4><div class="pr-line">בתי כנסת, בתי חב״ד ומסעדות כשרות לפי OpenStreetMap</div>
@@ -809,8 +811,8 @@ function practicalSection(iso2) {
   return `<details class="card practical" ${state.practicalOpen ? 'open' : ''}>
     <summary><h3>🧳 מידע מעשי</h3></summary>
     <div class="pr-grid">
+      ${factsItem(iso2)}
       <div class="pr-item" id="prShabbat"><h4>🕯️ שבת וחגים</h4><div class="spinner">טוען…</div></div>
-      ${visaItem(iso2)}
       ${communityItem(iso2)}
       <div class="pr-item" id="prMoney"><h4>💱 מטבע</h4><div class="spinner">טוען…</div></div>
       ${emergencyItem(iso2)}
@@ -900,7 +902,7 @@ async function exportPdf(iso2) {
       <div class="pdf-meta">${dmy(state.from)} – ${dmy(state.to)} · הופק ב־${dmy(today())}</div></div>
     ${$('#panelBody').innerHTML}
     <div class="pdf-foot" dir="ltr">${esc(location.href)}</div>`;
-  sheet.querySelectorAll('.p-actions, button, details.how').forEach(n => n.remove());
+  sheet.querySelectorAll('.p-actions, .trip, button, details.how').forEach(n => n.remove());
   sheet.querySelectorAll('details').forEach(d => { d.open = true; });
   document.body.appendChild(sheet);
   const title = document.title;
@@ -911,20 +913,20 @@ async function exportPdf(iso2) {
   setTimeout(() => window.print(), 50);
 }
 
-function factsCard(iso2) {
+function factsItem(iso2) {
   const i = state.info[iso2];
-  if (!i) return `<section class="card"><h3>ℹ️ פרטים כלליים</h3><div class="empty">אין נתונים</div></section>`;
+  if (!i) return `<div class="pr-item"><h4>ℹ️ פרטים כלליים</h4><div class="empty">אין נתונים</div></div>`;
   const langNames = new Intl.DisplayNames(['he'], { type: 'language' });
   const langs = Object.entries(i.languages || {}).map(([code, en]) => { try { const n = langNames.of(code); return n && n !== code ? n : en; } catch { return en; } });
   const cur = Object.entries(i.currencies || {}).map(([code, c]) => `${c.name} (${c.symbol || code})`);
-  return `<section class="card"><h3>ℹ️ פרטים כלליים</h3><dl class="facts">
+  return `<div class="pr-item"><h4>ℹ️ פרטים כלליים</h4><dl class="facts">
     ${i.capital?.length ? `<dt>בירה</dt><dd>${esc(i.capital.join(', '))}</dd>` : ''}
     ${i.pop ? `<dt>אוכלוסייה</dt><dd>${fmtNum.format(i.pop)} <small style="color:#6b7385">(${i.popYear})</small></dd>` : ''}
     ${langs.length ? `<dt>שפות</dt><dd>${esc(langs.join(', '))}</dd>` : ''}
     ${cur.length ? `<dt>מטבע</dt><dd>${esc(cur.join(', '))}</dd>` : ''}
     ${i.region ? `<dt>אזור</dt><dd>${esc(i.region)}</dd>` : ''}
     <dt>שעה מקומית</dt><dd id="localTime">–</dd>
-  </dl></section>`;
+  </dl></div>`;
 }
 
 function eventsCard(iso2) {
@@ -1062,11 +1064,11 @@ async function renderPanel() {
     ${riskCard(iso2)}
     ${nscNote(iso2)}
     <div class="daterange">📆 ${dmy(state.from)} – ${dmy(state.to)}</div>
+    <section class="card" id="wxCard"><h3>🌤️ מזג אוויר${pt?.label ? ` · ${esc(pt.label)}` : ''}</h3><div class="spinner">טוען…</div></section>
+    ${visaItem(iso2)}
     <section class="card" id="holCard"><h3>📅 חגים רשמיים</h3><div class="spinner">טוען…</div></section>
     ${eventsCard(iso2)}
-    ${practicalSection(iso2)}
-    ${factsCard(iso2)}
-    <section class="card" id="wxCard"><h3>🌤️ מזג אוויר${pt?.label ? ` · ${esc(pt.label)}` : ''}</h3><div class="spinner">טוען…</div></section>`;
+    ${practicalSection(iso2)}`;
 
   // weather
   fillMoney(iso2, token);
@@ -1079,7 +1081,7 @@ async function renderPanel() {
     if (tz && $('#localTime')) try { $('#localTime').textContent = new Intl.DateTimeFormat('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: tz }).format(new Date()); } catch {}
     const hi = avg(days.map(d => d.hi)), lo = avg(days.map(d => d.lo));
     const rainy = days.filter(d => d.rain >= 1).length;
-    const note = plan.kind === 'estimate' ? 'הערכה: ממוצע של אותם תאריכים ב־3 השנים האחרונות (מעבר לטווח התחזית של 16 יום)'
+    const note = plan.kind === 'estimate' ? 'הערכה: אותם תאריכים בשנה שעברה (מעבר לטווח התחזית של 16 יום)'
       : plan.kind === 'actual' ? 'נתונים היסטוריים בפועל' : 'תחזית';
     $('#wxCard').innerHTML = `<h3>🌤️ מזג אוויר${pt.label ? ` · ${esc(pt.label)}` : ''}</h3>
       <div class="wxsum"><span>מקס׳ <b class="hi">${Math.round(hi)}°</b></span><span>מינ׳ <b class="lo">${Math.round(lo)}°</b></span><span>ימי גשם <b>${rainy}</b>/${days.length}</span></div>
@@ -1367,23 +1369,45 @@ async function loadJewish() {
 
 // ---------- destination finder ----------
 let finderMatches = new Set();
+// Daily highs for each country's capital – and, in big countries, its other main cities – from the same
+// source as the country panel (forecast, archive, or the same dates last year beyond the forecast horizon)
 async function loadCountryTemps() {
   const key = `${state.from}_${state.to}`;
   if (state.ctemps?.key === key) return state.ctemps.temps;
-  const plan = weatherPlan(state.from, state.to);
-  const kind = plan.kind === 'forecast' ? 'forecast' : 'archive';
-  const from = plan.kind === 'estimate' ? shiftYears(plan.from, plan.shift) : plan.from;
-  const to = plan.kind === 'estimate' ? shiftYears(plan.to, plan.shift) : plan.to;
-  const pts = Object.keys(state.features).map(c => ({ c, p: repPoint(c) })).filter(x => x.p);
+  const pts = [];
+  for (const c of Object.keys(state.features)) {
+    const cap = repPoint(c);
+    if (!cap) continue;
+    pts.push({ c, lat: cap.lat, lon: cap.lon, label: cap.label });
+    const b = mainBounds(c);
+    const diag = kmBetween({ lat: b.getSouth(), lon: b.getWest() }, { lat: b.getNorth(), lon: b.getEast() });
+    if (diag > 1500) for (const x of spreadCities(c)) {
+      if (kmBetween(x, cap) > 150) pts.push({ c, lat: x.lat, lon: x.lon, label: x.he });
+    }
+  }
   const temps = {};
   for (let i = 0; i < pts.length; i += 80) {
     const chunk = pts.slice(i, i + 80);
-    let res = await getJSON(wxURL(kind, chunk.map(x => x.p.lat.toFixed(2)).join(','), chunk.map(x => x.p.lon.toFixed(2)).join(','), from, to, 'temperature_2m_max'));
-    if (!Array.isArray(res)) res = [res];
-    res.forEach((r, j) => { temps[chunk[j].c] = avg(r?.daily?.temperature_2m_max || []); });
+    let series;
+    // Open-Meteo allows 600 locations a minute (a range over two weeks counts double or triple):
+    // when it says 429, wait and try the same chunk again
+    for (let attempt = 0; !series; attempt++) {
+      try { series = await wxSeries(chunk, 'temperature_2m_max'); }
+      catch (e) {
+        if (!String(e.message).startsWith('429') || attempt >= 3 || !state.finder) throw e;
+        if ($('#fResults .spinner')) $('#fResults .spinner').textContent = `טוען טמפרטורות… (${Math.round(i / pts.length * 100)}%, ממתינים למכסה של Open-Meteo)`;
+        await new Promise(r => setTimeout(r, 25000));
+      }
+    }
+    chunk.forEach((p, j) => (temps[p.c] ||= []).push({ label: p.label, his: series[j].map(d => d.hi).filter(x => x != null) }));
   }
   state.ctemps = { key, temps };
   return temps;
+}
+// the place (capital first) whose daily high is within the range on at least one day
+function tempMatch(places, f) {
+  const ok = places?.find(p => p.his.some(t => t >= f.tmin && t <= f.tmax));
+  return ok ? { label: ok.label, lo: Math.min(...ok.his), hi: Math.max(...ok.his), capital: ok === places[0] } : null;
 }
 function readFinder() {
   return {
@@ -1406,7 +1430,7 @@ async function runFinder() {
   const REASON = { risk: 'מדד סיכון', temp: 'טמפרטורה', visa: 'ויזה' };
   const failOf = (iso2, r, t) => {
     if (!r || r.score >= f.risk) return 'risk';
-    if (f.tempOn && (t == null || t < f.tmin || t > f.tmax)) return 'temp';
+    if (f.tempOn && !t) return 'temp';
     if (f.visa && !visaOk(state.practical[iso2]?.visa)) return 'visa';
     return null;
   };
@@ -1414,7 +1438,7 @@ async function runFinder() {
   let withEvents = 0;
   for (const iso2 of Object.keys(state.features)) {
     if (iso2 === 'IL' || iso2 === 'AQ') continue;
-    const r = riskOf(iso2), t = temps?.[iso2], ev = eventsInRange(iso2);
+    const r = riskOf(iso2), t = temps ? tempMatch(temps[iso2], f) : null, ev = eventsInRange(iso2);
     if (f.events && !ev.length) continue;
     if (f.events) withEvents++;
     const fail = failOf(iso2, r, t);
@@ -1434,7 +1458,7 @@ async function runFinder() {
   $('#fResults').innerHTML = `<div class="f-count">${hits.length ? `נמצאו <b>${hits.length}</b> יעדים` : 'לא נמצאו יעדים – נסו להרחיב את הסינון'}</div>${why}
     <ul class="f-list">${hits.map(h => `<li data-iso="${h.iso2}">
       <span>${esc(nameHe(h.iso2, h.iso2))}${f.events ? `<small class="f-ev">${h.ev.map(e => `${CAT_ICON[e.cat] || ''} ${esc(e.name)}`).join(' · ')}</small>` : ''}</span>
-      ${h.t != null ? `<span class="tchip" style="background:${tempColor(h.t)}">${Math.round(h.t)}°</span>` : ''}
+      ${h.t ? `${h.t.capital ? '' : `<span class="f-city">${esc(h.t.label)}</span>`}<span class="tchip" dir="ltr" style="background:${tempColor((h.t.lo + h.t.hi) / 2)}">${Math.round(h.t.lo) === Math.round(h.t.hi) ? '' : `${Math.round(h.t.lo)}–`}${Math.round(h.t.hi)}°</span>` : ''}
       <span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span></li>`).join('')}</ul>`;
 }
 function openFinder(open) {

@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <!-- pinch-zoom allowed; text fields are 16px on phones so they don't trigger auto-zoom -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="only light">
 <title>מפת מטיילים</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <!-- bump ?v= on every release so browsers don't keep a stale copy (GitHub Pages caches for 10 min) -->
-<link rel="stylesheet" href="style.css?v=2026100809">
+<link rel="stylesheet" href="style.css?v=2026100811">
 </head>
 <body>
 <header class="topbar">
@@ -51,8 +52,9 @@
   <div id="finder" hidden>
     <div class="f-head"><h3>🎯 מאתר יעדים</h3><button id="fMap" class="f-map" title="הצג את התוצאות על המפה (הסינון נשאר)" aria-label="הצג את התוצאות על המפה">🗺️</button><button id="fClose" title="סגירה">✕</button></div>
     <div class="f-sub">לפי התאריכים שנבחרו למעלה</div>
-    <label class="chk"><input type="checkbox" id="fTempOn" checked> טמפ׳ מקס׳
+    <label class="chk"><input type="checkbox" id="fTempOn" checked> טמפ׳ ביום בין
       <input type="number" id="fTmin" value="18" min="-30" max="45"> ל־<input type="number" id="fTmax" value="30" min="-30" max="45">°</label>
+    <div class="f-hint">מתאים אם לפחות ביום אחד הטמפ׳ המקסימלית בטווח – בבירה, ובמדינות גדולות גם בערים מרכזיות אחרות</div>
     <label class="row">מדד סיכון עד
       <select id="fRisk"><option value="20">נמוך</option><option value="40" selected>נמוך־בינוני</option><option value="60">בינוני</option><option value="101">הכל</option></select></label>
     <label class="chk"><input type="checkbox" id="fVisa"> בלי ויזה מראש (פטור, בהגעה או ETA)</label>
@@ -70,6 +72,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/he.min.js"></script>
-<script src="app.js?v=2026100809"></script>
+<script src="app.js?v=2026100811"></script>
 </body>
 </html>
