@@ -1,6 +1,6 @@
 # Refreshes the data files and commits them if anything changed:
 #   daily  – NSC travel warnings (gov.il)
-#   weekly – practical info (visa, emergency numbers, plugs…) and Jewish places (OpenStreetMap)
+#   weekly – practical info (visa, emergency numbers, plugs…)
 name: Update data
 on:
   schedule:
@@ -29,10 +29,6 @@ jobs:
         continue-on-error: true
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.weekly }}" = "true" ] || [ "$(date -u +%u)" = "7" ]; then node scripts/update-practical.mjs; fi
-      - name: Jewish places (Sundays or manual)
-        continue-on-error: true
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.weekly }}" = "true" ] || [ "$(date -u +%u)" = "7" ]; then node scripts/update-jewish.mjs; fi
       - name: Commit
         run: |
           git config user.name "data-bot"

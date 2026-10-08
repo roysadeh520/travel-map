@@ -88,7 +88,6 @@ const state = {
   anti: {}, antiMeta: {},
   nsc: {}, nscMeta: {},
   practical: {},        // data/practical.json: visa, emergency, plugs, voltage, driving side, missions
-  jewish: null,         // data/jewish-places.json (built weekly; optional)
   practicalOpen: true,
   finder: null,         // destination-finder criteria while its panel is open
   ctemps: null,         // { key, temps } per-country temperature for the finder
@@ -339,6 +338,19 @@ L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', minZoom: LABEL_MAX_ZOOM + 1, maxZoom: 19,
 }).addTo(map);
+
+// The Esri base paints inland water (Caspian, Great Lakes, Victoria…) white like the land:
+// draw the big lakes in its sea colour, under the country fills and only while that base is shown
+map.createPane('water');
+map.getPane('water').style.zIndex = 250;
+map.getPane('water').style.pointerEvents = 'none';
+map.getPane('water').classList.add('base-terrain');   // same colour filter as the tiles
+const waterLayer = L.layerGroup();
+fetch('data/lakes.geojson').then(r => r.json()).then(g => {
+  L.geoJSON(g, { pane: 'water', interactive: false, style: { stroke: false, fillColor: '#90ded8', fillOpacity: 1 } }).addTo(waterLayer);
+  const sync = () => Math.round(map.getZoom()) <= LABEL_MAX_ZOOM ? waterLayer.addTo(map) : waterLayer.remove();
+  map.on('zoomend', sync); sync();
+}).catch(() => {});
 
 // ---------- Hebrew labels ----------
 map.createPane('labels');
@@ -762,11 +774,7 @@ function visaItem(iso2) {
     <div class="meta">Passport Index · יש לאמת מול נציגות המדינה לפני הטיסה</div></div>`;
 }
 function communityItem(iso2) {
-  const c = state.jewish?.counts?.[iso2];
-  const body = !state.jewish ? '<div class="pr-line">בתי כנסת, בתי חב״ד ומסעדות כשרות לפי OpenStreetMap</div>'
-    : c ? `<div class="pr-line">🕍 ${c.s} בתי כנסת · <span class="chabad">✡</span> ${c.c} בתי חב״ד · 🍽️ ${c.k} מקומות כשרים</div>`
-    : '<div class="pr-line">לא נמצאו מקומות במפה הפתוחה (OpenStreetMap)</div>';
-  return `<div class="pr-item"><h4>🕍 קהילה יהודית</h4>${body}
+  return `<div class="pr-item"><h4>🕍 קהילה יהודית</h4><div class="pr-line">בתי כנסת, בתי חב״ד ומסעדות כשרות לפי OpenStreetMap</div>
     <button class="linkbtn" data-act="jewish">הצג על המפה ←</button></div>`;
 }
 function emergencyItem(iso2) {
@@ -1224,33 +1232,16 @@ async function overpass(query) {
   }
   throw lastErr;
 }
-const JEWISH_KIND = { s: ['🕍', 'בית כנסת', '#2f6fde'], c: ['✡', 'בית חב״ד', '#7c3aed'], k: ['🍽️', 'אוכל כשר', '#16a34a'] };
 function setJewish(on) {
   jewishOn = on;
   $('#jewish').classList.toggle('on', on);
   if (on) { jewishLayer.addTo(map); loadJewish(); } else jewishLayer.remove();
 }
 function showJewishFor(iso2) {
-  if (state.jewish) fitCountry(iso2);
-  else if (state.point) map.flyTo([state.point.lat, state.point.lon], 12, { duration: 0.8 });
+  if (state.point) map.flyTo([state.point.lat, state.point.lon], 12, { duration: 0.8 });
   setJewish(true);
 }
-function drawJewishStatic() {
-  const z = map.getZoom();
-  if (z < 5) { jewishLayer.clearLayers(); toast('🕍 התקרבו למדינה כדי לראות בתי כנסת, בתי חב״ד ומסעדות כשרות'); return; }
-  const b = map.getBounds().pad(0.1), pts = state.jewish.places.filter(p => b.contains([p[0], p[1]]));
-  jewishLayer.clearLayers();
-  for (const [lat, lon, kind, name, , id] of pts.slice(0, 2500)) {
-    const [icon, label, color] = JEWISH_KIND[kind];
-    const osm = { n: 'node', w: 'way', r: 'relation' }[id[0]] + '/' + id.slice(1);
-    L.circleMarker([lat, lon], { radius: z >= 10 ? 7 : 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 1 })
-      .bindPopup(`<b>${icon} ${esc(name || label)}</b><br><small>${label}</small><br><a href="https://www.openstreetmap.org/${osm}" target="_blank" rel="noopener">פתיחה ב־OpenStreetMap</a>`)
-      .addTo(jewishLayer);
-  }
-  if (pts.length > 2500) toast(`מוצגים 2,500 מתוך ${pts.length.toLocaleString('he-IL')} מקומות – התקרבו לפירוט`);
-}
 async function loadJewish() {
-  if (state.jewish) return drawJewishStatic();
   if (map.getZoom() < 10) { toast('🕍 התקרבו לעיר (זום 10 ומעלה) כדי לראות בתי כנסת ומסעדות כשרות'); return; }
   const b = map.getBounds();
   const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map(n => n.toFixed(3)).join(',');
@@ -1298,7 +1289,7 @@ async function loadCountryTemps() {
 function readFinder() {
   return {
     tempOn: $('#fTempOn').checked, tmin: +$('#fTmin').value, tmax: +$('#fTmax').value, risk: +$('#fRisk').value,
-    visa: $('#fVisa').checked, events: $('#fEvents').checked, jewish: $('#fJewish').checked,
+    visa: $('#fVisa').checked, events: $('#fEvents').checked,
   };
 }
 let finderSeq = 0;
@@ -1313,12 +1304,11 @@ async function runFinder() {
     if (seq !== finderSeq || !state.finder) return;
   }
   // first failing criterion per country, so we can explain why countries with events were left out
-  const REASON = { risk: 'מדד סיכון', temp: 'טמפרטורה', visa: 'ויזה', jewish: 'קהילה יהודית' };
+  const REASON = { risk: 'מדד סיכון', temp: 'טמפרטורה', visa: 'ויזה' };
   const failOf = (iso2, r, t) => {
     if (!r || r.score >= f.risk) return 'risk';
     if (f.tempOn && (t == null || t < f.tmin || t > f.tmax)) return 'temp';
     if (f.visa && !visaOk(state.practical[iso2]?.visa)) return 'visa';
-    if (f.jewish && !(state.jewish?.counts?.[iso2] && (state.jewish.counts[iso2].s + state.jewish.counts[iso2].c) > 0)) return 'jewish';
     return null;
   };
   const hits = [], eventFails = {};
@@ -1354,8 +1344,6 @@ function openFinder(open) {
   $('#finderBtn').classList.toggle('on', open);
   if (open) {
     if (state.layer === 'temp') setLayer('risk');
-    $('#fJewish').disabled = !state.jewish;
-    $('#fJewish').closest('label').title = state.jewish ? '' : 'נתוני הקהילה עדיין לא נבנו (מתעדכנים פעם בשבוע)';
     state.finder = readFinder();
     runFinder();
   } else {
@@ -1370,6 +1358,12 @@ $('#finderBtn').addEventListener('click', () => {
 $('#fMap').addEventListener('click', () => { $('#finder').hidden = true; document.body.classList.remove('finder-open'); });
 $('#fClose').addEventListener('click', () => openFinder(false));
 $('#finder').addEventListener('change', runFinder);
+// number fields update the results while typing, not only when the field loses focus
+let finderTimer;
+$('#finder').addEventListener('input', e => {
+  if (e.target.type !== 'number') return;
+  clearTimeout(finderTimer); finderTimer = setTimeout(runFinder, 350);
+});
 $('#fResults').addEventListener('click', e => {
   const iso = e.target.closest('[data-iso]')?.dataset.iso;
   if (iso) selectCountry(iso, { zoom: true });
@@ -1401,7 +1395,6 @@ function readHash() {
     fetch('data/practical.json').then(r => (r.ok ? r.json() : null)).catch(() => null),
   ]);
   state.practical = practical?.countries || {};
-  fetch('data/jewish-places.json').then(r => (r.ok ? r.json() : null)).then(j => { if (j?.places) state.jewish = j; }).catch(() => {});
   state.nsc = nsc.countries; state.nscMeta = nsc._meta || {};
   state.info = info;
   state.anti = anti.countries; state.antiMeta = anti._meta || {};
