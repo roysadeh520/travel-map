@@ -699,8 +699,13 @@ function mainBounds(iso2) {
 
 function fitCountry(iso2) {
   const wide = innerWidth > 760;
-  map.flyToBounds(mainBounds(iso2), {
-    paddingTopLeft: [30, 30], paddingBottomRight: wide ? [420, 30] : [30, 30], maxZoom: 7, duration: 0.8 });
+  // fractional zoom just for this fit, so the country fills the screen instead of
+  // rounding down to the next whole level (flyToBounds reads zoomSnap synchronously)
+  const snap = map.options.zoomSnap;
+  map.options.zoomSnap = 0.25;
+  map.flyToBounds(mainBounds(iso2), {   // left: zoom buttons · right (desktop): the country panel · bottom: legend
+    paddingTopLeft: [55, 15], paddingBottomRight: wide ? [400, 15] : [10, 45], maxZoom: 9, duration: 0.8 });
+  map.options.zoomSnap = snap;
 }
 
 function riskCard(iso2) {
@@ -1061,6 +1066,7 @@ function showResults(items) {
   results._items = items;
 }
 q.addEventListener('input', () => {
+  if (!$('#panel').hidden) closePanel();   // a new search replaces the open country
   const text = q.value.trim(), local = localMatches(text), seq = ++searchSeq;
   clearTimeout(typeTimer);
   if (text.length < 3) return showResults(local);
