@@ -88,8 +88,9 @@ const state = {
   anti: {}, antiMeta: {},
   nsc: {}, nscMeta: {},
   practical: {},        // data/practical.json: visa, emergency, plugs, voltage, driving side, missions
+  areas: {},            // map areas without an ISO code, by Natural Earth A3 code
   pdates: null,         // the country panel's own date range ({from, to}); null = the map's dates
-  folds: (() => { try { return JSON.parse(localStorage.getItem('tm-folds')) || {}; } catch { return {}; } })(),   // panel sections the viewer closed
+  folds: {},            // panel sections closed by the viewer; reset whenever a country is opened
   finder: null,         // destination-finder criteria while its panel is open
   ctemps: null,         // { key, temps } per-country temperature for the finder
   events: [],
@@ -151,7 +152,7 @@ function centroid(feature) {
 function repPoint(iso2) {
   const i = state.info[iso2];
   if (i?.cap) return { lat: i.cap[0], lon: i.cap[1], label: i.capital?.[0] };
-  const f = state.features[iso2];
+  const f = state.features[iso2] || state.areas[iso2];
   return f ? { ...centroid(f), label: 'מרכז המדינה' } : null;
 }
 
@@ -220,7 +221,7 @@ const kmBetween = (a, b) => {
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 function spreadCities(iso2, max = 5) {
-  const f = state.features[iso2]; if (!f) return [];
+  const f = state.features[iso2] || state.areas[iso2]; if (!f) return [];
   const bb = L.geoJSON(f).getBounds();
   const diag = kmBetween({ lat: bb.getSouth(), lon: bb.getWest() }, { lat: bb.getNorth(), lon: bb.getEast() });
   const minKm = Math.min(600, Math.max(80, diag / 5));
@@ -710,6 +711,7 @@ async function selectCountry(iso2, { zoom = false, point = null } = {}) {
   const f = state.features[iso2];
   if (!f) return;
   hideIntro();
+  state.folds = {};
   if (iso2 !== state.selected) state.panelReset = true;   // applied once the panel is visible (see renderPanel)
   state.selected = iso2;
   state.point = point || repPoint(iso2);
@@ -724,7 +726,7 @@ async function selectCountry(iso2, { zoom = false, point = null } = {}) {
 // Bounds of the country's main landmass plus nearby islands – overseas parts
 // (French Guiana, Alaska, Svalbard…) would otherwise zoom out to half the world.
 function mainBounds(iso2) {
-  const g = state.features[iso2].geometry;
+  const g = (state.features[iso2] || state.areas[iso2]).geometry;
   if (g.type !== 'MultiPolygon') return L.geoJSON(g).getBounds();
   const parts = g.coordinates.map(c => L.geoJSON({ type: 'Polygon', coordinates: c }).getBounds());
   const size = b => (b.getEast() - b.getWest()) * (b.getNorth() - b.getSouth());
@@ -800,9 +802,9 @@ function visaItem(iso2) {
   const v = state.practical[iso2]?.visa;
   if (iso2 === 'IL') return '';
   const [label, color] = v ? VISA[v.type] || [v.type, '#6b7385'] : ['אין מידע', '#6b7385'];
-  return `<section class="card"><h3>🛂 ויזה לדרכון ישראלי</h3>
+  return `<div class="pr-item"><h4>🛂 ויזה לדרכון ישראלי</h4>
     <span class="badge" style="background:${color}22;color:${darkText(color)}">● ${label}${v?.days ? ` · עד ${v.days} יום` : ''}</span>
-    <div class="meta">Passport Index · יש לאמת מול נציגות המדינה לפני הטיסה</div></section>`;
+    <div class="meta">Passport Index · יש לאמת מול נציגות המדינה לפני הטיסה</div></div>`;
 }
 function communityItem(iso2) {
   return `<div class="pr-item"><h4>🕍 קהילה יהודית</h4><div class="pr-line">בתי כנסת, בתי חב״ד ומסעדות כשרות לפי OpenStreetMap</div>
@@ -837,12 +839,13 @@ function powerItem(iso2) {
 }
 function practicalSection(iso2) {
   return fold('practical', '🧳 מידע מעשי', `<div class="pr-grid">
+      ${visaItem(iso2)}
       ${factsItem(iso2)}
-      <div class="pr-item" id="prShabbat"><h4>🕯️ שבת וחגים</h4><div class="spinner">טוען…</div></div>
-      ${communityItem(iso2)}
       <div class="pr-item" id="prMoney"><h4>💱 מטבע</h4><div class="spinner">טוען…</div></div>
       ${emergencyItem(iso2)}
       <div class="pr-item" id="prDaylight"><h4>🌅 שעות אור</h4><div class="spinner">טוען…</div></div>
+      <div class="pr-item" id="prShabbat"><h4>🕯️ שבת וחגים</h4><div class="spinner">טוען…</div></div>
+      ${communityItem(iso2)}
       ${powerItem(iso2)}
     </div>
   </div>`);
@@ -955,7 +958,7 @@ function factsItem(iso2) {
   </dl></div>`;
 }
 
-// a collapsible panel section; open unless the viewer closed it before (remembered per section)
+// a collapsible panel section; every country opens with all sections open (kept while re-rendering the same one)
 function fold(id, title, body) {
   return `<details class="card fold" data-fold="${id}" ${state.folds[id] === false ? '' : 'open'}>
     <summary><h3 id="${id}Title">${title}</h3></summary><div id="${id}Body">${body}</div></details>`;
@@ -963,7 +966,6 @@ function fold(id, title, body) {
 $('#panelBody').addEventListener('toggle', e => {   // 'toggle' doesn't bubble: listen in the capture phase
   const id = e.target.dataset?.fold; if (!id) return;
   state.folds[id] = e.target.open;
-  try { localStorage.setItem('tm-folds', JSON.stringify(state.folds)); } catch {}
 }, true);
 function eventsCard(iso2) {
   const ev = eventsInRange(iso2, pd().from, pd().to);
@@ -1091,7 +1093,7 @@ async function renderPanel() {
       <img src="https://flagcdn.com/w160/${iso2.toLowerCase()}.png" alt="" onerror="this.remove()">
       <div><h2>${esc(nameHe(iso2, p.he || p.en))}</h2><div class="en">${esc(p.en)}</div></div>
       <div class="p-dates${state.pdates ? ' custom' : ''}">
-        <input id="pDates" readonly aria-label="תאריכים למדינה זו" title="שינוי התאריכים למדינה זו בלבד">
+        <label class="p-dates-chip" title="שינוי התאריכים למדינה זו בלבד">📆<input id="pDates" readonly aria-label="תאריכים למדינה זו"><span class="p-dates-edit">✎</span></label>
         ${state.pdates ? '<button class="p-dates-reset" data-act="pdreset" title="חזרה לתאריכי המפה">↺</button>' : ''}
       </div>
     </div>
@@ -1104,7 +1106,6 @@ async function renderPanel() {
     ${riskCard(iso2)}
     ${nscNote(iso2)}
     ${fold('wx', `🌤️ מזג אוויר${pt?.label ? ` · ${esc(pt.label)}` : ''}`, '<div class="spinner">טוען…</div>')}
-    ${visaItem(iso2)}
     ${fold('hol', '📅 חגים רשמיים', '<div class="spinner">טוען…</div>')}
     ${eventsCard(iso2)}
     ${practicalSection(iso2)}`;
@@ -1343,7 +1344,7 @@ function setupMonthPicker(inst) {
   cal.appendChild(panel);
   let year;
   const draw = () => {
-    panel.innerHTML = `<div class="mp-year"><button data-y="-1" aria-label="שנה קודמת">‹</button><b>${year}</b><button data-y="1" aria-label="שנה הבאה">›</button></div>
+    panel.innerHTML = `<div class="mp-year"><button data-y="1" aria-label="שנה הבאה">‹</button><b>${year}</b><button data-y="-1" aria-label="שנה קודמת">›</button></div>
       <div class="mp-grid">${names.map((n, m) => `<button data-m="${m}" class="${m === inst.currentMonth && year === inst.currentYear ? 'cur' : ''}${m === new Date().getMonth() && year === new Date().getFullYear() ? ' today' : ''}">${n}</button>`).join('')}</div>
       <button class="mp-today">היום</button>`;
   };
@@ -1444,7 +1445,7 @@ async function loadCountryTemps() {
   const key = `${state.from}_${state.to}`;
   if (state.ctemps?.key === key) return state.ctemps.temps;
   const pts = [];
-  for (const c of Object.keys(state.features)) {
+  for (const c of [...Object.keys(state.features), ...Object.keys(state.areas)]) {
     const cap = repPoint(c);
     if (!cap) continue;
     pts.push({ c, lat: cap.lat, lon: cap.lon, label: cap.label });
@@ -1498,15 +1499,15 @@ async function runFinder() {
   // first failing criterion per country, so we can explain why countries with events were left out
   const REASON = { risk: 'מדד סיכון', temp: 'טמפרטורה', visa: 'ויזה' };
   const failOf = (iso2, r, t) => {
-    if (!r || r.score >= f.risk) return 'risk';
+    if (f.risk <= 100 && (!r || r.score >= f.risk)) return 'risk';   // 'all' also keeps countries without a score
     if (f.tempOn && !t) return 'temp';
     if (f.visa && !visaOk(state.practical[iso2]?.visa)) return 'visa';
     return null;
   };
   const hits = [], eventFails = {};
   let withEvents = 0;
-  for (const iso2 of Object.keys(state.features)) {
-    if (iso2 === 'IL' || iso2 === 'AQ') continue;
+  for (const iso2 of [...Object.keys(state.features), ...Object.keys(state.areas)]) {
+    if (iso2 === 'AQ') continue;
     const r = riskOf(iso2), t = temps ? tempMatch(temps[iso2], f) : null, ev = eventsInRange(iso2);
     if (f.events && !ev.length) continue;
     if (f.events) withEvents++;
@@ -1515,7 +1516,7 @@ async function runFinder() {
     hits.push({ iso2, r, t, ev });
   }
   // same risk level: bigger countries first (otherwise dozens of micro-states with a 0 score lead the list)
-  hits.sort((a, b) => a.r.bucket - b.r.bucket || (state.info[b.iso2]?.pop || 0) - (state.info[a.iso2]?.pop || 0));
+  hits.sort((a, b) => (a.r?.bucket ?? 5) - (b.r?.bucket ?? 5) || (state.info[b.iso2]?.pop || 0) - (state.info[a.iso2]?.pop || 0));
   finderMatches = new Set(hits.map(h => h.iso2));
   restyle();
   // with the events filter on, show the matching countries' event markers on the map
@@ -1526,9 +1527,9 @@ async function runFinder() {
     ? `<div class="f-why">מתוך ${withEvents} מדינות עם אירועים בתאריכים, נפסלו: ${Object.entries(eventFails).map(([k, n]) => `${n} בגלל ${REASON[k]}`).join(' · ')}</div>` : '';
   $('#fResults').innerHTML = `<div class="f-count">${hits.length ? `נמצאו <b>${hits.length}</b> יעדים` : 'לא נמצאו יעדים – נסו להרחיב את הסינון'}</div>${why}
     <ul class="f-list">${hits.map(h => `<li data-iso="${h.iso2}">
-      <span>${esc(nameHe(h.iso2, h.iso2))}${f.events ? `<small class="f-ev">${h.ev.map(e => `${CAT_ICON[e.cat] || ''} ${esc(e.name)}`).join(' · ')}</small>` : ''}</span>
+      <span>${esc(nameHe(h.iso2, (state.features[h.iso2] || state.areas[h.iso2]).properties.he || (state.features[h.iso2] || state.areas[h.iso2]).properties.en))}${f.events ? `<small class="f-ev">${h.ev.map(e => `${CAT_ICON[e.cat] || ''} ${esc(e.name)}`).join(' · ')}</small>` : ''}</span>
       ${h.t ? `${h.t.capital ? '' : `<span class="f-city">${esc(h.t.label)}</span>`}<span class="tchip" dir="ltr" style="background:${tempColor((h.t.lo + h.t.hi) / 2)}">${Math.round(h.t.lo) === Math.round(h.t.hi) ? '' : `${Math.round(h.t.lo)}–`}${Math.round(h.t.hi)}°</span>` : ''}
-      <span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span></li>`).join('')}</ul>`;
+      ${h.r ? `<span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span>` : '<span class="rchip">–</span>'}</li>`).join('')}</ul>`;
 }
 function openFinder(open) {
   $('#finder').hidden = !open;
@@ -1558,7 +1559,8 @@ $('#finder').addEventListener('input', e => {
 });
 $('#fResults').addEventListener('click', e => {
   const iso = e.target.closest('[data-iso]')?.dataset.iso;
-  if (iso) selectCountry(iso, { zoom: true });
+  if (iso && state.features[iso]) selectCountry(iso, { zoom: true });
+  else if (iso) fitCountry(iso);   // an area without a country panel: just show it
 });
 
 // ---------- URL hash (shareable state) ----------
@@ -1595,6 +1597,8 @@ function readHash() {
   fetch('data/destinations.json').then(r => r.json()).then(d => { state.dests = d.places; refreshTrip(); }).catch(() => {});
   fetch('data/airports.json').then(r => r.json()).then(a => { state.airports = a.airports; refreshTrip(); }).catch(() => {});
   for (const f of geo.features) if (f.properties.iso2 && !state.features[f.properties.iso2]) state.features[f.properties.iso2] = f;
+  // areas without an ISO code (Somaliland, Gaza…): no country panel, but the finder checks them like countries
+  for (const f of geo.features) if (!f.properties.iso2 && f.properties.a3) state.areas[f.properties.a3] = f;
   labelFeatures = geo.features.filter(f => (f.properties.iso2 || AREA_NAMES[f.properties.a3]) && f.properties.lx != null)
     .sort((a, b) => a.properties.rank - b.properties.rank || a.properties.minz - b.properties.minz);
   landFeatures = geo.features.filter(f => f.properties.iso2 !== 'AQ').map(f => {
