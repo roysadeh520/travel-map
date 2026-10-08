@@ -415,10 +415,10 @@ body.finder-open #legend { display: none; }
   body.filters-hidden .layers, body.filters-hidden .dates, body.filters-hidden .finder-btn { display: none; }
   /* date range and quick presets on one row */
   .dates { display: flex; flex-wrap: nowrap; gap: 6px; width: 100%; }
-  .dates label { grid-column: auto; flex: 1 1 auto; min-width: 0; font-size: 0; }   /* hide the 📆 icon, keep the input */
-  .dates input.range { width: 100%; font-size: 11px; padding: 5px 1px; letter-spacing: -0.3px; }
-  .presets { flex: none; overflow-x: auto; }
-  .presets button { padding: 3px 7px; font-size: 11.5px; }
+  .dates label { grid-column: auto; flex: 1 1 52%; min-width: 0; font-size: 0; }   /* hide the 📆 icon, keep the input */
+  .dates input.range { width: 100%; font-size: 13.5px; padding: 6px 4px; text-align: center; }
+  .presets { flex: 0 1 auto; min-width: 0; overflow-x: auto; gap: 3px; }
+  .presets button { padding: 3px 6px; font-size: 11.5px; }
   /* country panel and destination finder take the whole screen */
   #panel, #finder {
     position: fixed; inset: 0; width: auto; max-width: none; max-height: none;

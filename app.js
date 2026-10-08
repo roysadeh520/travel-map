@@ -678,10 +678,29 @@ async function selectCountry(iso2, { zoom = false, point = null } = {}) {
   renderPanel();
 }
 
+// Bounds of the country's main landmass plus nearby islands – overseas parts
+// (French Guiana, Alaska, Svalbard…) would otherwise zoom out to half the world.
+function mainBounds(iso2) {
+  const g = state.features[iso2].geometry;
+  if (g.type !== 'MultiPolygon') return L.geoJSON(g).getBounds();
+  const parts = g.coordinates.map(c => L.geoJSON({ type: 'Polygon', coordinates: c }).getBounds());
+  const size = b => (b.getEast() - b.getWest()) * (b.getNorth() - b.getSouth());
+  const main = parts.reduce((a, b) => size(b) > size(a) ? b : a);
+  // grow from the main part, chaining through islands up to 3° away (keeps archipelagos whole)
+  const out = L.latLngBounds(main.getSouthWest(), main.getNorthEast());
+  let left = parts.filter(b => b !== main), grew = true;
+  while (grew) {
+    grew = false;
+    const near = out.pad(0).extend([out.getSouth() - 3, out.getWest() - 3]).extend([out.getNorth() + 3, out.getEast() + 3]);
+    left = left.filter(b => near.contains(b.getCenter()) ? (out.extend(b), grew = true, false) : true);
+  }
+  return out;
+}
+
 function fitCountry(iso2) {
   const wide = innerWidth > 760;
-  map.flyToBounds(L.geoJSON(state.features[iso2]).getBounds(), {
-    paddingTopLeft: [30, 30], paddingBottomRight: wide ? [420, 30] : [30, innerHeight * 0.6], maxZoom: 7, duration: 0.8 });
+  map.flyToBounds(mainBounds(iso2), {
+    paddingTopLeft: [30, 30], paddingBottomRight: wide ? [420, 30] : [30, 30], maxZoom: 7, duration: 0.8 });
 }
 
 function riskCard(iso2) {
@@ -977,15 +996,21 @@ async function renderPanel() {
 
 $('#panelBody').addEventListener('click', e => {
   const act = e.target.closest('[data-act]')?.dataset.act;
-  if (act === 'zoom') fitCountry(state.selected);
+  if (act === 'zoom') {
+    // phone: the panel covers the whole map – close it first so the zoom is visible
+    const iso2 = state.selected;
+    if (innerWidth <= 760) closePanel();
+    fitCountry(iso2);
+  }
   if (act === 'jewish') showJewishFor(state.selected);
   if (act === 'share') shareCountry(state.selected);
   if (act === 'pdf') exportPdf(state.selected);
 });
-$('#close').addEventListener('click', () => {
+function closePanel() {
   $('#panel').hidden = true; state.selected = null; pointMarker.remove(); restyle(); saveHash();
   resetPageZoom();
-});
+}
+$('#close').addEventListener('click', closePanel);
 
 // ---------- search ----------
 // While typing: countries (local) + Photon (built for search-as-you-type).
@@ -1115,7 +1140,7 @@ async function datesChanged() {
 }
 // one range picker, shown and typed as dd/mm/yyyy
 const fp = flatpickr('#range', {
-  mode: 'range', dateFormat: 'd/m/Y', allowInput: innerWidth > 760, disableMobile: true,
+  mode: 'range', dateFormat: innerWidth > 760 ? 'd/m/Y' : 'd/m/y', allowInput: innerWidth > 760, disableMobile: true,
   static: true, // avoids flatpickr reading cross-origin stylesheets when positioning the popup
   showMonths: innerWidth > 760 ? 2 : 1, monthSelectorType: 'static',
   locale: { ...flatpickr.l10ns.he, rangeSeparator: ' – ' },
