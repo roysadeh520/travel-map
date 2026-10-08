@@ -397,9 +397,8 @@ function drawLabels() {
 map.on('zoomend moveend', drawLabels);
 
 // ---------- temperature heat map ----------
-// Grid points regular in *screen* space (snapped to a lat/lon lattice so panning reuses cached values) are fetched
-// from Open-Meteo for land only, painted one pixel per point into a tiny canvas, scaled up with smoothing
-// (= bilinear interpolation) and clipped to the land polygons.
+// Temperatures on a fixed lat/lon lattice (spacing set by the zoom level) are fetched from Open-Meteo for land
+// only, interpolated bilinearly and clipped to the land polygons.
 const TEMP_STOPS = [[-25, [44, 62, 145]], [-10, [59, 111, 216]], [0, [127, 178, 236]], [10, [198, 227, 214]],
   [18, [249, 221, 119]], [25, [245, 155, 76]], [32, [217, 74, 43]], [40, [139, 26, 26]]];
 function tempRGB(t) {
@@ -416,7 +415,7 @@ map.createPane('heat');
 map.getPane('heat').style.zIndex = 350;
 map.getPane('heat').style.pointerEvents = 'none';
 const heatCanvas = L.DomUtil.create('canvas', 'heat-canvas', map.getPane('heat'));
-const heat = { grid: null, cols: 0, rows: 0, w: 0, h: 0, origin: null, zoom: null, estimate: false, seq: 0 };
+const heat = { grid: null, cols: 0, rows: 0, north: 0, west: 0, step: 1, estimate: false, seq: 0 };
 const tempCache = new Map();
 const MAX_HEAT_POINTS = 220;   // Open-Meteo counts every location as one call (600/min on the free tier)
 const pointMarker = L.circleMarker([0, 0], { radius: 6, color: '#fff', weight: 2, fillColor: '#1d2433', fillOpacity: 1 });
@@ -442,25 +441,35 @@ function isLand(lat, lon) {
 }
 
 let heatTimer;
+// Lattice spacing for a zoom level: about HEAT_PX pixels between nodes, rounded to a "nice" number of degrees.
+// It depends on the zoom only, so a place always gets the same nodes – and the same colour – however the map is panned.
+const HEAT_PX = 60;
+const heatStep = z => niceStep(HEAT_PX * 360 / (256 * 2 ** Math.round(z)));
 async function loadHeat() {
   if (state.layer !== 'temp' || !landFeatures.length) return;
-  const seq = ++heat.seq, size = map.getSize();
-  const cols = Math.max(8, Math.min(22, Math.round(size.x / 50))), rows = Math.max(6, Math.round(cols * size.y / size.x));
-  // snap to half the grid spacing: panning still hits the cache, but a sample never drifts more than a quarter cell
-  const b = map.getBounds(), step = niceStep(Math.min(360, b.getEast() - b.getWest()) / cols / 2);
+  const seq = ++heat.seq, step = heatStep(map.getZoom());
   const plan = weatherPlan(state.from, state.to);
   const from = plan.kind === 'estimate' ? shiftYears(plan.from, plan.shift) : plan.from;
   const to = plan.kind === 'estimate' ? shiftYears(plan.to, plan.shift) : plan.to;
   const kind = plan.kind === 'forecast' ? 'forecast' : 'archive';
 
-  const samples = [];
+  // nodes over the view plus a margin of two nodes, so small pans need nothing new
+  const b = map.getBounds();
+  const north = Math.min(84, Math.ceil(b.getNorth() / step) * step + 2 * step);
+  const south = Math.max(-84, Math.floor(b.getSouth() / step) * step - 2 * step);
+  const west = Math.floor(b.getWest() / step) * step - 2 * step, east = Math.ceil(b.getEast() / step) * step + 2 * step;
+  const rows = Math.round((north - south) / step) + 1, cols = Math.round((east - west) / step) + 1;
+  const nodes = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-    const ll = map.containerPointToLatLng([(c + 0.5) * size.x / cols, (r + 0.5) * size.y / rows]);
-    const rawLat = Math.max(-84, Math.min(84, ll.lat)), rawLon = wrapLon(ll.lng);
-    const lat = +snapTo(rawLat, step).toFixed(2), lon = +snapTo(rawLon, step).toFixed(2);
-    samples.push({ lat, lon, land: isLand(rawLat, rawLon) || isLand(lat, lon), key: `${kind}_${from}_${to}_${lat}_${lon}` });
+    const lat = +(north - r * step).toFixed(2), lon = +(west + c * step).toFixed(2), wl = +wrapLon(lon).toFixed(2), h = step / 2;
+    // a node counts as land if it or a point half a cell away is land, so coasts and islands get a value
+    const land = isLand(lat, wl) || isLand(lat + h, wl) || isLand(lat - h, wl) || isLand(lat, wrapLon(wl + h)) || isLand(lat, wrapLon(wl - h));
+    nodes.push({ lat, lon: wl, land, key: `${kind}_${from}_${to}_${lat}_${wl}` });
   }
-  const need = [...new Map(samples.filter(s => s.land && !tempCache.has(s.key)).map(s => [s.key, s])).values()].slice(0, MAX_HEAT_POINTS);
+  // nearest-to-the-view first, so the cap (Open-Meteo's per-minute limit) never leaves a hole in the middle
+  const c = b.getCenter(), dist = n => (n.lat - c.lat) ** 2 + (wrapLon(n.lon - c.lng)) ** 2;
+  const need = [...new Map(nodes.filter(n => n.land && !tempCache.has(n.key)).map(n => [n.key, n])).values()]
+    .sort((x, y) => dist(x) - dist(y)).slice(0, MAX_HEAT_POINTS);
   if (need.length) toast('טוען טמפרטורות…', 8000);
   try {
     for (let i = 0; i < need.length; i += 100) {
@@ -476,65 +485,29 @@ async function loadHeat() {
   if (seq !== heat.seq || state.layer !== 'temp') return;
   if (need.length) $('#toast').hidden = true;
 
-  // ocean cells take the average of their land neighbours, so colours don't fade at the coast
-  let grid = samples.map(s => (s.land ? tempCache.get(s.key) ?? null : null));
-  for (let pass = 0; pass < 4 && grid.some(v => v == null); pass++) {
+  // sea nodes take the average of their land neighbours, so colours don't fade at the coast
+  let grid = nodes.map(n => (n.land ? tempCache.get(n.key) ?? null : null));
+  for (let pass = 0; pass < 3 && grid.some(v => v == null); pass++) {
     grid = grid.map((v, i) => {
       if (v != null) return v;
-      const r = Math.floor(i / cols), c = i % cols, near = [];
+      const r = Math.floor(i / cols), cc = i % cols, near = [];
       for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-        const rr = r + dr, cc = c + dc;
-        if ((dr || dc) && rr >= 0 && rr < rows && cc >= 0 && cc < cols && grid[rr * cols + cc] != null) near.push(grid[rr * cols + cc]);
+        const rr = r + dr, c2 = cc + dc;
+        if ((dr || dc) && rr >= 0 && rr < rows && c2 >= 0 && c2 < cols && grid[rr * cols + c2] != null) near.push(grid[rr * cols + c2]);
       }
       return near.length ? avg(near) : null;
     });
   }
-  Object.assign(heat, { grid, cols, rows, w: size.x, h: size.y, origin: map.containerPointToLayerPoint([0, 0]), zoom: map.getZoom(), estimate: plan.kind === 'estimate' });
+  Object.assign(heat, { grid, cols, rows, north, west, step, estimate: plan.kind === 'estimate' });
   drawHeat();
   drawLegend();
 }
 
-function drawHeat() {
-  const ctx = heatCanvas.getContext('2d');
-  if (state.layer !== 'temp' || !heat.grid || heat.zoom !== map.getZoom()) { ctx.clearRect(0, 0, heatCanvas.width, heatCanvas.height); return; }
-  const { grid, cols, rows, w, h } = heat;
-  heatCanvas.width = w; heatCanvas.height = h;
-  heatCanvas.style.width = w + 'px'; heatCanvas.style.height = h + 'px';
-  L.DomUtil.setPosition(heatCanvas, heat.origin);
-  heatCanvas.style.opacity = '';
-
-  const small = document.createElement('canvas');
-  small.width = cols; small.height = rows;
-  const sctx = small.getContext('2d'), img = sctx.createImageData(cols, rows);
-  grid.forEach((t, i) => { if (t != null) img.data.set([...tempRGB(t), 255], i * 4); });
-  sctx.putImageData(img, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(small, 0, 0, w, h);
-
-  // keep only land
-  const view = map.getBounds().pad(0.1);
-  ctx.globalCompositeOperation = 'destination-in';
-  ctx.beginPath();
-  for (const f of landFeatures) {
-    const b = f.bbox;
-    if (b[2] < view.getWest() || b[0] > view.getEast() || b[3] < view.getSouth() || b[1] > view.getNorth()) continue;
-    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
-    for (const poly of polys) for (const ring of poly) ring.forEach(([lon, lat], i) => {
-      const p = map.latLngToLayerPoint([lat, lon]).subtract(heat.origin);
-      i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
-    });
-  }
-  ctx.fill('evenodd');
-  ctx.globalCompositeOperation = 'source-over';
-}
-
-// temperature under the cursor, bilinear on the grid
-function tempAt(ll) {
-  const { grid, cols, rows, w, h } = heat;
-  if (!grid || heat.zoom !== map.getZoom()) return null;
-  const p = map.latLngToLayerPoint(ll).subtract(heat.origin);
-  const gx = Math.max(0, Math.min(cols - 1, p.x / w * cols - 0.5)), gy = Math.max(0, Math.min(rows - 1, p.y / h * rows - 0.5));
+// value of the lattice at a map position (bilinear between the four surrounding nodes)
+function latticeAt(lat, lon) {
+  const { grid, cols, rows, north, west, step } = heat;
+  const gy = (north - lat) / step, gx = (lon - west) / step;
+  if (gx < 0 || gy < 0 || gx > cols - 1 || gy > rows - 1) return null;
   const x0 = Math.floor(gx), y0 = Math.floor(gy), x1 = Math.min(cols - 1, x0 + 1), y1 = Math.min(rows - 1, y0 + 1);
   const v = (x, y) => grid[y * cols + x];
   const q = [v(x0, y0), v(x1, y0), v(x0, y1), v(x1, y1)];
@@ -543,11 +516,59 @@ function tempAt(ll) {
   return (q[0] * (1 - fx) + q[1] * fx) * (1 - fy) + (q[2] * (1 - fx) + q[3] * fx) * fy;
 }
 
+// Paints the lattice in geographic space: a quarter-resolution image computed pixel by pixel (Mercator is
+// separable, so each column has one longitude and each row one latitude), scaled up smoothly and clipped to land.
+function drawHeat() {
+  const ctx = heatCanvas.getContext('2d');
+  if (state.layer !== 'temp' || !heat.grid) { ctx.clearRect(0, 0, heatCanvas.width, heatCanvas.height); return; }
+  const size = map.getSize(), q = 4, W = Math.ceil(size.x / q), H = Math.ceil(size.y / q);
+  const origin = map.containerPointToLayerPoint([0, 0]);
+  heatCanvas.width = size.x; heatCanvas.height = size.y;
+  heatCanvas.style.width = size.x + 'px'; heatCanvas.style.height = size.y + 'px';
+  L.DomUtil.setPosition(heatCanvas, origin);
+  heatCanvas.style.opacity = '';
+
+  const lons = Array.from({ length: W }, (_, x) => map.containerPointToLatLng([(x + 0.5) * q, 0]).lng);
+  const lats = Array.from({ length: H }, (_, y) => map.containerPointToLatLng([0, (y + 0.5) * q]).lat);
+  const small = document.createElement('canvas');
+  small.width = W; small.height = H;
+  const sctx = small.getContext('2d'), img = sctx.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const t = latticeAt(lats[y], lons[x]);
+    if (t != null) img.data.set([...tempRGB(t), 255], (y * W + x) * 4);
+  }
+  sctx.putImageData(img, 0, 0);
+  ctx.clearRect(0, 0, size.x, size.y);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(small, 0, 0, W * q, H * q);
+
+  // keep only land
+  const view = map.getBounds().pad(0.1);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.beginPath();
+  for (const f of landFeatures) {
+    const bb = f.bbox;
+    if (bb[2] < view.getWest() || bb[0] > view.getEast() || bb[3] < view.getSouth() || bb[1] > view.getNorth()) continue;
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    for (const poly of polys) for (const ring of poly) ring.forEach(([lon, lat], i) => {
+      const p = map.latLngToLayerPoint([lat, lon]).subtract(origin);
+      i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
+    });
+  }
+  ctx.fill('evenodd');
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+// temperature under the cursor
+function tempAt(ll) {
+  return heat.grid ? latticeAt(ll.lat, ll.lng) : null;
+}
+
 let landFeatures = [];
 map.on('zoomstart', () => { heatCanvas.style.opacity = 0; });
 map.on('moveend resize', () => {
   if (state.layer !== 'temp') return;
-  drawHeat();
+  drawHeat();                       // at once, from the nodes already loaded (they're geographic, so still right)
   clearTimeout(heatTimer);
   heatTimer = setTimeout(loadHeat, 350);
 });
