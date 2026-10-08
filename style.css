@@ -370,6 +370,7 @@ span.flatpickr-weekday { color: var(--muted); font-weight: 500; font-size: 12px;
 .sub-h small { color: var(--muted); font-weight: 400; }
 table.wx.cities tr { cursor: pointer; }
 table.wx.cities tr:hover td { background: var(--accent-soft); }
+table.wx.cities tr.sel td { background: var(--accent-soft); }   /* the city the panel shows */
 .tchip { display: inline-block; min-width: 38px; text-align: center; border-radius: 6px; padding: 1px 6px; font-weight: 500; color: #1d2433; }
 .tchip-lo { font-weight: 400; }
 

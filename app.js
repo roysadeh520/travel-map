@@ -379,14 +379,16 @@ async function loadCitiesWx(iso2, token) {
     $('#citiesWx').innerHTML = `<h4 class="sub-h">ערים מרכזיות <small>· לחצו לפירוט יומי</small></h4>
       <table class="wx cities">${cities.map((c, k) => {
         const d = series[k], hi = avg(d.map(x => x.hi)), lo = avg(d.map(x => x.lo)), wet = d.filter(x => x.rain >= 1).length;
-        return `<tr data-city="${k}"><td>${esc(c.he)}</td>
+        // the city whose information the panel shows (chosen above, clicked here, or the capital)
+        const shown = state.point && kmBetween(c, state.point) < 10;
+        return `<tr data-city="${k}"${shown ? ' class="sel"' : ''}><td>${esc(c.he)}</td>
           <td><span class="tchip" style="background:${tempColor(hi)}">${Math.round(hi)}°</span></td>
           <td>${lo == null ? '–' : `<span class="tchip tchip-lo" style="${tempChipLo(lo)}">${Math.round(lo)}°</span>`}</td><td>${rainCell(d, wet)}</td></tr>`;
       }).join('')}</table>`;
     $('#citiesWx').onclick = e => {
       const k = e.target.closest('[data-city]')?.dataset.city; if (k == null) return;
       const c = cities[+k];
-      selectCountry(iso2, { point: { lat: c.lat, lon: c.lon, label: c.he, clicked: true } });
+      showPoint({ lat: c.lat, lon: c.lon, label: c.he, clicked: true });   // the trip row above moves to it too
     };
   } catch (e) { console.error(e); }
 }
@@ -1208,10 +1210,18 @@ function refreshTrip() {
 }
 $('#panelBody').addEventListener('change', e => {
   if (e.target.id !== 'tripCity' || !state.trip) return;
-  state.trip.city = state.trip.list[+e.target.value];
-  const l = tripLinks(state.trip.iso2, state.trip.city);
-  $('#tripFlights').href = l.flights; $('#tripHotels').href = l.hotels;
+  // the chosen destination's own information: weather, daylight, Shabbat times, local time
+  const c = state.trip.city = state.trip.list[+e.target.value];
+  showPoint({ lat: c[3], lon: c[4], label: c[0], clicked: true }, { keepTrip: true });
 });
+// show the panel's information for another place in the same country. keepTrip: the trip row keeps its choice
+// (the destination was just picked there); otherwise it moves to the place, like a click on the map (see tripCities)
+function showPoint(point, { keepTrip = false } = {}) {
+  state.point = point;
+  if (state.trip && keepTrip) state.trip.point = point;
+  pointMarker.setLatLng([point.lat, point.lon]).addTo(map);
+  renderPanel();
+}
 
 // a long country name gets a smaller font, so it fits beside the dates in two lines at most
 const nameCls = n => n.length > 14 ? ' class="long"' : n.length > 7 ? ' class="mid"' : '';
