@@ -397,9 +397,11 @@ function drawLabels() {
 }
 map.on('zoomend moveend', drawLabels);
 
-// ---------- temperature heat map ----------
-// Temperatures on a fixed lat/lon lattice (spacing set by the zoom level) are fetched from Open-Meteo for land
-// only, interpolated bilinearly and clipped to the land polygons.
+// ---------- climate normals & temperature heat map ----------
+// data/climate.json (scripts/build-climate.mjs): the average daily high of every month on a 1° land grid, from
+// NASA POWER (2001–2020). Each day's normal is interpolated between the mid-month values, so a date range has a
+// normal high for every one of its days. The heat map, the finder and the panel's "normal" line all read it:
+// no live requests, nothing changes while panning, and all three agree.
 const TEMP_STOPS = [[-25, [44, 62, 145]], [-10, [59, 111, 216]], [0, [127, 178, 236]], [10, [198, 227, 214]],
   [18, [249, 221, 119]], [25, [245, 155, 76]], [32, [217, 74, 43]], [40, [139, 26, 26]]];
 function tempRGB(t) {
@@ -411,123 +413,103 @@ function tempRGB(t) {
   return TEMP_STOPS[TEMP_STOPS.length - 1][1];
 }
 const tempColor = t => `rgb(${tempRGB(t).join(',')})`;
+const wrapLon = lon => ((lon + 540) % 360) - 180;
+
+let climate = null;   // { north, west, step, rows, cols, v: Float32Array(rows * cols * 12), NaN where there is no data }
+const climateReady = fetch('data/climate.json').then(r => r.json()).then(j => {
+  const { north, west, step, rows, cols, scale } = j._meta, v = new Float32Array(rows * cols * 12).fill(NaN);
+  j.i.forEach((node, k) => { for (let m = 0; m < 12; m++) v[node * 12 + m] = j.v[k * 12 + m] / scale; });
+  climate = { north, west, step, rows, cols, v };
+}).catch(e => console.error('climate data', e));
+
+// for each day of a range: the two months it lies between and the weight of the second (mid-month anchors)
+function dayWeights(from, to) {
+  const out = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const t = parse(d), dim = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+    const x = t.getMonth() + (t.getDate() - 0.5) / dim - 0.5, m0 = Math.floor(x);
+    out.push([(m0 + 12) % 12, (m0 + 13) % 12, x - m0]);
+  }
+  return out;
+}
+// the 12 monthly normals at a point, bilinear between the four surrounding grid nodes (missing nodes skipped)
+function monthlyAt(lat, lon) {
+  if (!climate) return null;
+  const { north, west, step, rows, cols, v } = climate;
+  const gy = (north - lat) / step, gx = (wrapLon(lon) - west) / step;
+  if (gy < 0 || gy > rows - 1) return null;
+  const y0 = Math.floor(gy), x0 = Math.floor(gx), fy = gy - y0, fx = gx - x0;
+  const out = new Array(12).fill(0);
+  let wsum = 0;
+  for (const [dy, dx, w] of [[0, 0, (1 - fy) * (1 - fx)], [0, 1, (1 - fy) * fx], [1, 0, fy * (1 - fx)], [1, 1, fy * fx]]) {
+    const r = Math.min(rows - 1, y0 + dy), c = (x0 + dx + cols) % cols, i = (r * cols + c) * 12;
+    if (w === 0 || Number.isNaN(v[i])) continue;
+    for (let m = 0; m < 12; m++) out[m] += v[i + m] * w;
+    wsum += w;
+  }
+  return wsum ? out.map(x => x / wsum) : null;
+}
+// normal daily highs at a point for every day of a range
+function normalDays(lat, lon, from, to) {
+  const mo = monthlyAt(lat, lon);
+  return mo && dayWeights(from, to).map(([a, b, f]) => mo[a] * (1 - f) + mo[b] * f);
+}
 
 map.createPane('heat');
 map.getPane('heat').style.zIndex = 350;
 map.getPane('heat').style.pointerEvents = 'none';
-const heatCanvas = L.DomUtil.create('canvas', 'heat-canvas', map.getPane('heat'));
-const heat = { grid: null, cols: 0, rows: 0, north: 0, west: 0, step: 1, estimate: false, seq: 0 };
-const tempCache = new Map();
-const MAX_HEAT_POINTS = 220;   // Open-Meteo counts every location as one call (600/min on the free tier)
+const heatCanvas = L.DomUtil.create('canvas', 'heat-canvas leaflet-zoom-animated', map.getPane('heat'));
+const heat = { key: null, grid: null, nw: null, seq: 0 };   // grid: per node, the average normal high of the dates
 const pointMarker = L.circleMarker([0, 0], { radius: 6, color: '#fff', weight: 2, fillColor: '#1d2433', fillOpacity: 1 });
 
-const niceStep = d => [0.1, 0.25, 0.5, 1, 2, 2.5, 5, 10].find(s => s >= d) || 10;
-const snapTo = (v, step) => Math.round(v / step) * step;
-const wrapLon = lon => ((lon + 540) % 360) - 180;
-function isLand(lat, lon) {
-  for (const f of landFeatures) {
-    const b = f.bbox;
-    if (lat < b[1] || lat > b[3] || lon < b[0] || lon > b[2]) continue;
-    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
-    for (const poly of polys) {
-      let inside = false;
-      for (const ring of poly) for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-        const [xi, yi] = ring[i], [xj, yj] = ring[j];
-        if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-      }
-      if (inside) return true;
-    }
-  }
-  return false;
-}
-
-let heatTimer;
-// Lattice spacing for a zoom level: about HEAT_PX pixels between nodes, rounded to a "nice" number of degrees.
-// It depends on the zoom only, so a place always gets the same nodes – and the same colour – however the map is panned.
-const HEAT_PX = 60;
-const heatStep = z => niceStep(HEAT_PX * 360 / (256 * 2 ** Math.round(z)));
 async function loadHeat() {
   if (state.layer !== 'temp' || !landFeatures.length) return;
-  const seq = ++heat.seq, step = heatStep(map.getZoom());
-  const plan = weatherPlan(state.from, state.to);
-  const from = plan.kind === 'estimate' ? shiftYears(plan.from, plan.shift) : plan.from;
-  const to = plan.kind === 'estimate' ? shiftYears(plan.to, plan.shift) : plan.to;
-  const kind = plan.kind === 'forecast' ? 'forecast' : 'archive';
-
-  // nodes over the view plus a margin of two nodes, so small pans need nothing new
-  const b = map.getBounds();
-  const north = Math.min(84, Math.ceil(b.getNorth() / step) * step + 2 * step);
-  const south = Math.max(-84, Math.floor(b.getSouth() / step) * step - 2 * step);
-  const west = Math.floor(b.getWest() / step) * step - 2 * step, east = Math.ceil(b.getEast() / step) * step + 2 * step;
-  const rows = Math.round((north - south) / step) + 1, cols = Math.round((east - west) / step) + 1;
-  const nodes = [];
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-    const lat = +(north - r * step).toFixed(2), lon = +(west + c * step).toFixed(2), wl = +wrapLon(lon).toFixed(2), h = step / 2;
-    // a node counts as land if it or a point half a cell away is land, so coasts and islands get a value
-    const land = isLand(lat, wl) || isLand(lat + h, wl) || isLand(lat - h, wl) || isLand(lat, wrapLon(wl + h)) || isLand(lat, wrapLon(wl - h));
-    nodes.push({ lat, lon: wl, land, key: `${kind}_${from}_${to}_${lat}_${wl}` });
-  }
-  // nearest-to-the-view first, so the cap (Open-Meteo's per-minute limit) never leaves a hole in the middle
-  const c = b.getCenter(), dist = n => (n.lat - c.lat) ** 2 + (wrapLon(n.lon - c.lng)) ** 2;
-  const need = [...new Map(nodes.filter(n => n.land && !tempCache.has(n.key)).map(n => [n.key, n])).values()]
-    .sort((x, y) => dist(x) - dist(y)).slice(0, MAX_HEAT_POINTS);
-  if (need.length) toast('טוען טמפרטורות…', 8000);
-  try {
-    for (let i = 0; i < need.length; i += 100) {
-      const chunk = need.slice(i, i + 100);
-      let res = await getJSON(wxURL(kind, chunk.map(p => p.lat).join(','), chunk.map(p => p.lon).join(','), from, to, 'temperature_2m_max'));
-      if (!Array.isArray(res)) res = [res];
-      res.forEach((r, j) => tempCache.set(chunk[j].key, avg(r?.daily?.temperature_2m_max || [])));
+  await climateReady;
+  if (!climate || state.layer !== 'temp') return;
+  const key = `${state.from}_${state.to}`;
+  if (heat.key !== key) {
+    // one weight per month for the whole range, then a single pass over the grid
+    const w = new Array(12).fill(0), days = dayWeights(state.from, state.to);
+    for (const [a, b, f] of days) { w[a] += (1 - f) / days.length; w[b] += f / days.length; }
+    const { v, rows, cols } = climate, grid = new Float32Array(rows * cols);
+    for (let n = 0; n < rows * cols; n++) {
+      if (Number.isNaN(v[n * 12])) { grid[n] = NaN; continue; }
+      let s = 0;
+      for (let m = 0; m < 12; m++) if (w[m]) s += v[n * 12 + m] * w[m];
+      grid[n] = s;
     }
-  } catch (e) {
-    console.error(e);
-    toast('לא הצלחנו לטעון טמפרטורות (ייתכן שחרגנו ממכסת Open-Meteo). נסו שוב בעוד דקה.');
+    Object.assign(heat, { key, grid });
   }
-  if (seq !== heat.seq || state.layer !== 'temp') return;
-  if (need.length) $('#toast').hidden = true;
-
-  // sea nodes take the average of their land neighbours, so colours don't fade at the coast
-  let grid = nodes.map(n => (n.land ? tempCache.get(n.key) ?? null : null));
-  for (let pass = 0; pass < 3 && grid.some(v => v == null); pass++) {
-    grid = grid.map((v, i) => {
-      if (v != null) return v;
-      const r = Math.floor(i / cols), cc = i % cols, near = [];
-      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-        const rr = r + dr, c2 = cc + dc;
-        if ((dr || dc) && rr >= 0 && rr < rows && c2 >= 0 && c2 < cols && grid[rr * cols + c2] != null) near.push(grid[rr * cols + c2]);
-      }
-      return near.length ? avg(near) : null;
-    });
-  }
-  Object.assign(heat, { grid, cols, rows, north, west, step, estimate: plan.kind === 'estimate' });
   drawHeat();
   drawLegend();
 }
 
-// value of the lattice at a map position (bilinear between the four surrounding nodes)
+// value of the dates' grid at a map position (bilinear; missing nodes skipped) – runs for every pixel, so no allocations
 function latticeAt(lat, lon) {
-  const { grid, cols, rows, north, west, step } = heat;
-  const gy = (north - lat) / step, gx = (lon - west) / step;
-  if (gx < 0 || gy < 0 || gx > cols - 1 || gy > rows - 1) return null;
-  const x0 = Math.floor(gx), y0 = Math.floor(gy), x1 = Math.min(cols - 1, x0 + 1), y1 = Math.min(rows - 1, y0 + 1);
-  const v = (x, y) => grid[y * cols + x];
-  const q = [v(x0, y0), v(x1, y0), v(x0, y1), v(x1, y1)];
-  if (q.some(x => x == null)) return avg(q);
-  const fx = gx - x0, fy = gy - y0;
-  return (q[0] * (1 - fx) + q[1] * fx) * (1 - fy) + (q[2] * (1 - fx) + q[3] * fx) * fy;
+  const { north, west, step, rows, cols } = climate, grid = heat.grid;
+  const gy = (north - lat) / step, gx = (wrapLon(lon) - west) / step;
+  if (gy < 0 || gy > rows - 1) return null;
+  const y0 = Math.floor(gy), x0 = Math.floor(gx), fy = gy - y0, fx = gx - x0;
+  const r0 = y0 * cols, r1 = Math.min(rows - 1, y0 + 1) * cols, c0 = (x0 + cols) % cols, c1 = (x0 + 1 + cols) % cols;
+  let s = 0, ws = 0, t, w;
+  w = (1 - fy) * (1 - fx); t = grid[r0 + c0]; if (w && t === t) { s += t * w; ws += w; }   // t === t: not NaN
+  w = (1 - fy) * fx;       t = grid[r0 + c1]; if (w && t === t) { s += t * w; ws += w; }
+  w = fy * (1 - fx);       t = grid[r1 + c0]; if (w && t === t) { s += t * w; ws += w; }
+  w = fy * fx;             t = grid[r1 + c1]; if (w && t === t) { s += t * w; ws += w; }
+  return ws ? s / ws : null;
 }
 
-// Paints the lattice in geographic space: a quarter-resolution image computed pixel by pixel (Mercator is
+// Paints the grid in geographic space: a quarter-resolution image computed pixel by pixel (Mercator is
 // separable, so each column has one longitude and each row one latitude), scaled up smoothly and clipped to land.
 function drawHeat() {
   const ctx = heatCanvas.getContext('2d');
   if (state.layer !== 'temp' || !heat.grid) { ctx.clearRect(0, 0, heatCanvas.width, heatCanvas.height); return; }
   const size = map.getSize(), q = 4, W = Math.ceil(size.x / q), H = Math.ceil(size.y / q);
   const origin = map.containerPointToLayerPoint([0, 0]);
+  heat.nw = map.containerPointToLatLng([0, 0]);   // for the zoom animation
   heatCanvas.width = size.x; heatCanvas.height = size.y;
   heatCanvas.style.width = size.x + 'px'; heatCanvas.style.height = size.y + 'px';
   L.DomUtil.setPosition(heatCanvas, origin);
-  heatCanvas.style.opacity = '';
 
   const lons = Array.from({ length: W }, (_, x) => map.containerPointToLatLng([(x + 0.5) * q, 0]).lng);
   const lats = Array.from({ length: H }, (_, y) => map.containerPointToLatLng([0, (y + 0.5) * q]).lat);
@@ -536,7 +518,9 @@ function drawHeat() {
   const sctx = small.getContext('2d'), img = sctx.createImageData(W, H);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const t = latticeAt(lats[y], lons[x]);
-    if (t != null) img.data.set([...tempRGB(t), 255], (y * W + x) * 4);
+    if (t == null) continue;
+    const c = tempRGB(t), o = (y * W + x) * 4;
+    img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
   }
   sctx.putImageData(img, 0, 0);
   ctx.clearRect(0, 0, size.x, size.y);
@@ -566,13 +550,12 @@ function tempAt(ll) {
 }
 
 let landFeatures = [];
-map.on('zoomstart', () => { heatCanvas.style.opacity = 0; });
-map.on('moveend resize', () => {
-  if (state.layer !== 'temp') return;
-  drawHeat();                       // at once, from the nodes already loaded (they're geographic, so still right)
-  clearTimeout(heatTimer);
-  heatTimer = setTimeout(loadHeat, 350);
+// while zooming, scale the existing picture with the map (as Leaflet does for images) instead of blanking it
+map.on('zoomanim', e => {
+  if (!heat.nw || state.layer !== 'temp') return;
+  L.DomUtil.setTransform(heatCanvas, map._latLngToNewLayerPoint(heat.nw, e.zoom, e.center), map.getZoomScale(e.zoom));
 });
+map.on('moveend resize', () => { if (state.layer === 'temp') drawHeat(); });
 
 let countryLayer;
 function fillFor(iso2) {
@@ -621,7 +604,7 @@ function tooltipFor(p) {
   }
   else if (state.layer === 'temp') {
     const t = state.mouseLL ? tempAt(state.mouseLL) : null;
-    extra = t == null ? '' : `🌡️ כאן: ${Math.round(t)}° <small>(ממוצע מקסימום יומי)</small>`;
+    extra = t == null ? '' : `🌡️ כאן: ${Math.round(t)}° <small>(ממוצע רב־שנתי ביום)</small>`;
   }
   else { const ev = eventsInRange(p.iso2); extra = ev.length ? ev.map(e => (CAT_ICON[e.cat] || '') + ' ' + e.name).join('<br>') : 'אין אירועים במאגר בתאריכים אלה'; }
   return `<b>${esc(n)}</b>${extra ? `<br><span style="color:#6b7385">${extra}</span>` : ''}${TT_CTA}`;
@@ -659,10 +642,10 @@ function drawLegend() {
   } else if (state.layer === 'temp') {
     const ticks = [-20, -10, 0, 10, 20, 30, 40];
     L_.innerHTML = `<h4>🌡️ כמה חם ביום?</h4>
-      <div class="sub" style="margin:0 0 4px">הצבע מראה את הטמפ׳ המקסימלית (בשעות היום), בממוצע לתאריכים שנבחרו:</div>
+      <div class="sub" style="margin:0 0 4px">הצבע מראה את הטמפ׳ המקסימלית (בשעות היום) הרגילה בתאריכים שנבחרו:</div>
       <div class="tbar" style="background:linear-gradient(to right, ${ticks.map(t => tempColor(t)).join(', ')})"></div>
       <div class="tticks">${ticks.map(t => `<span>${t}°</span>`).join('')}</div>
-      <div class="sub">רשת נקודות לפי האזור שעל המסך – התקרבו לפירוט. לחיצה על מדינה מציגה מזג אוויר בנקודה.${heat.estimate ? '<br>הערכה לפי אותם תאריכים בשנה הקודמת (מעבר לטווח התחזית).' : ''}</div>`;
+      <div class="sub">ממוצע רב־שנתי לתאריכים האלה (NASA POWER, 2001–2020) – לא תחזית. לחיצה על מדינה מציגה גם תחזית או נתוני אמת.</div>`;
   } else {
     L_.innerHTML = `<h4>אירועים עונתיים בתאריכים שנבחרו</h4>${rows([{ color: EVENT_ON, label: 'יש אירועים' }, { color: EVENT_OFF, label: 'אין במאגר' }])}
       <div class="sub">${Object.keys(CAT_ICON).map(k => `${CAT_ICON[k]} ${CAT_NAME[k]}`).join(' · ')}</div>`;
@@ -942,6 +925,14 @@ async function exportPdf(iso2) {
   setTimeout(() => window.print(), 50);
 }
 
+// great-circle distance from Ben Gurion airport to the capital; flying time ≈ distance at ~800 km/h + half an hour
+const TLV = { lat: 32.01, lon: 34.89 };
+function flightLine(iso2) {
+  const cap = iso2 !== 'IL' && repPoint(iso2);
+  if (!cap) return '';
+  const km = kmBetween(TLV, cap), hours = Math.max(1, Math.round((km / 800 + 0.5) * 2) / 2);
+  return `<dt>מרחק טיסה</dt><dd>כ־${fmtNum.format(Math.round(km / 50) * 50)} ק״מ מתל אביב · כ־${hours} שעות</dd>`;
+}
 function factsItem(iso2) {
   const i = state.info[iso2];
   if (!i) return `<div class="pr-item"><h4>ℹ️ פרטים כלליים</h4><div class="empty">אין נתונים</div></div>`;
@@ -954,6 +945,7 @@ function factsItem(iso2) {
     ${langs.length ? `<dt>שפות</dt><dd>${esc(langs.join(', '))}</dd>` : ''}
     ${cur.length ? `<dt>מטבע</dt><dd>${esc(cur.join(', '))}</dd>` : ''}
     ${i.region ? `<dt>אזור</dt><dd>${esc(i.region)}</dd>` : ''}
+    ${flightLine(iso2)}
     <dt>שעה מקומית</dt><dd id="localTime">–</dd>
   </dl></div>`;
 }
@@ -1093,7 +1085,7 @@ async function renderPanel() {
       <img src="https://flagcdn.com/w160/${iso2.toLowerCase()}.png" alt="" onerror="this.remove()">
       <div><h2>${esc(nameHe(iso2, p.he || p.en))}</h2><div class="en">${esc(p.en)}</div></div>
       <div class="p-dates${state.pdates ? ' custom' : ''}">
-        <label class="p-dates-chip" title="שינוי התאריכים למדינה זו בלבד">📆<input id="pDates" readonly aria-label="תאריכים למדינה זו"><span class="p-dates-edit">✎</span></label>
+        <input id="pDates" readonly aria-label="תאריכים למדינה זו" title="שינוי התאריכים למדינה זו בלבד">
         ${state.pdates ? '<button class="p-dates-reset" data-act="pdreset" title="חזרה לתאריכי המפה">↺</button>' : ''}
       </div>
     </div>
@@ -1123,7 +1115,10 @@ async function renderPanel() {
     const rainy = days.filter(d => d.rain >= 1).length;
     const note = plan.kind === 'estimate' ? 'הערכה: אותם תאריכים בשנה שעברה (מעבר לטווח התחזית של 16 יום)'
       : plan.kind === 'actual' ? 'נתונים היסטוריים בפועל' : 'תחזית';
+    // the multi-year normal for the same dates: what the heat map and the finder go by
+    const normal = avg(normalDays(pt.lat, pt.lon, pd().from, pd().to) || []);
     $('#wxBody').innerHTML = `<div class="wxsum"><span>מקס׳ <b class="hi">${Math.round(hi)}°</b></span><span>מינ׳ <b class="lo">${Math.round(lo)}°</b></span><span>ימי גשם <b>${rainy}</b>/${days.length}</span></div>
+      ${normal != null ? `<div class="wx-normal">ממוצע רב־שנתי לתאריכים האלה: מקס׳ <b>${Math.round(normal)}°</b> <small>(לפיו המפה ומאתר היעדים)</small></div>` : ''}
       <div id="citiesWx"></div>
       <table class="wx"><tr><th>יום</th><th></th><th>מקס׳</th><th>מינ׳</th><th>משקעים</th></tr>
       ${days.map((d, k) => { const [ic, t] = WX(d.code); return `<tr${k >= 6 ? ' class="more"' : ''}><td>${dayLabel(d.date)}</td><td title="${t}">${ic}</td>
@@ -1439,61 +1434,55 @@ async function loadJewish() {
 
 // ---------- destination finder ----------
 let finderMatches = new Set();
-// Daily highs for each country's capital – and, in big countries, its other main cities – from the same
-// source as the country panel (forecast, archive, or the same dates last year beyond the forecast horizon)
+// Normal daily highs (data/climate.json, the same numbers as the heat map) for every day of the range, at each
+// country's capital, its other main cities in big countries, and its tourist spots (data/destinations.json)
 async function loadCountryTemps() {
   const key = `${state.from}_${state.to}`;
   if (state.ctemps?.key === key) return state.ctemps.temps;
-  const pts = [];
+  await climateReady;
+  if (!climate) throw new Error('no climate data');
+  const temps = {};
+  const add = (c, lat, lon, label, capital = false) => {
+    const his = normalDays(lat, lon, state.from, state.to);
+    if (his) (temps[c] ||= []).push({ label, his, capital });
+  };
   for (const c of [...Object.keys(state.features), ...Object.keys(state.areas)]) {
     const cap = repPoint(c);
     if (!cap) continue;
-    pts.push({ c, lat: cap.lat, lon: cap.lon, label: cap.label });
+    add(c, cap.lat, cap.lon, cap.label, true);
     const b = mainBounds(c);
     const diag = kmBetween({ lat: b.getSouth(), lon: b.getWest() }, { lat: b.getNorth(), lon: b.getEast() });
-    if (diag > 1500) for (const x of spreadCities(c)) {
-      if (kmBetween(x, cap) > 150) pts.push({ c, lat: x.lat, lon: x.lon, label: x.he });
-    }
+    if (diag > 1500) for (const x of spreadCities(c)) if (kmBetween(x, cap) > 150) add(c, x.lat, x.lon, x.he);
   }
-  const temps = {};
-  for (let i = 0; i < pts.length; i += 80) {
-    const chunk = pts.slice(i, i + 80);
-    let series;
-    // Open-Meteo allows 600 locations a minute (a range over two weeks counts double or triple):
-    // when it says 429, wait and try the same chunk again
-    for (let attempt = 0; !series; attempt++) {
-      try { series = await wxSeries(chunk, 'temperature_2m_max'); }
-      catch (e) {
-        if (!String(e.message).startsWith('429') || attempt >= 3 || !state.finder) throw e;
-        if ($('#fResults .spinner')) $('#fResults .spinner').textContent = `טוען טמפרטורות… (${Math.round(i / pts.length * 100)}%, ממתינים למכסה של Open-Meteo)`;
-        await new Promise(r => setTimeout(r, 25000));
-      }
-    }
-    chunk.forEach((p, j) => (temps[p.c] ||= []).push({ label: p.label, his: series[j].map(d => d.hi).filter(x => x != null) }));
-  }
+  for (const [he, , c, lat, lon] of state.dests) add(c, lat, lon, he);
   state.ctemps = { key, temps };
   return temps;
 }
-// the place (capital first) whose daily high is within the range on at least one day
+// share of the days whose normal high is within the range; the country takes its best place (capital on a tie)
+const DAYS_NEEDED = { any: d => d > 0, most: d => d >= 0.5, all: d => d === 1 };
 function tempMatch(places, f) {
-  const ok = places?.find(p => p.his.some(t => t >= f.tmin && t <= f.tmax));
-  return ok ? { label: ok.label, lo: Math.min(...ok.his), hi: Math.max(...ok.his), capital: ok === places[0] } : null;
+  let best = null;
+  for (const p of places || []) {
+    const share = p.his.filter(t => t >= f.tmin && t <= f.tmax).length / p.his.length;
+    if (!best || share > best.share) best = { label: p.label, capital: p.capital, share, lo: Math.min(...p.his), hi: Math.max(...p.his) };
+  }
+  return best && DAYS_NEEDED[f.days](best.share) ? best : null;
 }
 function readFinder() {
   return {
-    tempOn: $('#fTempOn').checked, tmin: +$('#fTmin').value, tmax: +$('#fTmax').value, risk: +$('#fRisk').value,
+    tempOn: $('#fTempOn').checked, tmin: +$('#fTmin').value, tmax: +$('#fTmax').value, days: $('#fDays').value, risk: +$('#fRisk').value,
     visa: $('#fVisa').checked, events: $('#fEvents').checked,
   };
 }
 let finderSeq = 0;
+const FINDER_SHORT = 15;   // results shown before 'show all'
 async function runFinder() {
   if (!state.finder) return;
   const f = state.finder = readFinder(), seq = ++finderSeq;
   let temps = null;
   if (f.tempOn) {
-    $('#fResults').innerHTML = '<div class="spinner">טוען טמפרטורות לכל המדינות…</div>';
     try { temps = await loadCountryTemps(); }
-    catch { $('#fResults').innerHTML = '<div class="empty">לא הצלחנו לטעון טמפרטורות. נסו שוב בעוד דקה.</div>'; return; }
+    catch { $('#fResults').innerHTML = '<div class="empty">לא הצלחנו לטעון את נתוני האקלים. רעננו את הדף.</div>'; return; }
     if (seq !== finderSeq || !state.finder) return;
   }
   // first failing criterion per country, so we can explain why countries with events were left out
@@ -1515,8 +1504,10 @@ async function runFinder() {
     if (fail) { if (f.events) eventFails[fail] = (eventFails[fail] || 0) + 1; continue; }
     hits.push({ iso2, r, t, ev });
   }
-  // same risk level: bigger countries first (otherwise dozens of micro-states with a 0 score lead the list)
-  hits.sort((a, b) => (a.r?.bucket ?? 5) - (b.r?.bucket ?? 5) || (state.info[b.iso2]?.pop || 0) - (state.info[a.iso2]?.pop || 0));
+  // best temperature fit first (share of days in range), then lower risk, then bigger countries
+  // (otherwise dozens of micro-states with a 0 score lead the list)
+  hits.sort((a, b) => (b.t?.share ?? 0) - (a.t?.share ?? 0) || (a.r?.bucket ?? 5) - (b.r?.bucket ?? 5)
+    || (state.info[b.iso2]?.pop || 0) - (state.info[a.iso2]?.pop || 0));
   finderMatches = new Set(hits.map(h => h.iso2));
   restyle();
   // with the events filter on, show the matching countries' event markers on the map
@@ -1526,10 +1517,11 @@ async function runFinder() {
   const why = f.events && withEvents > hits.length
     ? `<div class="f-why">מתוך ${withEvents} מדינות עם אירועים בתאריכים, נפסלו: ${Object.entries(eventFails).map(([k, n]) => `${n} בגלל ${REASON[k]}`).join(' · ')}</div>` : '';
   $('#fResults').innerHTML = `<div class="f-count">${hits.length ? `נמצאו <b>${hits.length}</b> יעדים` : 'לא נמצאו יעדים – נסו להרחיב את הסינון'}</div>${why}
-    <ul class="f-list">${hits.map(h => `<li data-iso="${h.iso2}">
+    <ul class="f-list${state.finderAll ? '' : ' short'}">${hits.map(h => `<li data-iso="${h.iso2}">
       <span>${esc(nameHe(h.iso2, (state.features[h.iso2] || state.areas[h.iso2]).properties.he || (state.features[h.iso2] || state.areas[h.iso2]).properties.en))}${f.events ? `<small class="f-ev">${h.ev.map(e => `${CAT_ICON[e.cat] || ''} ${esc(e.name)}`).join(' · ')}</small>` : ''}</span>
       ${h.t ? `${h.t.capital ? '' : `<span class="f-city">${esc(h.t.label)}</span>`}<span class="tchip" dir="ltr" style="background:${tempColor((h.t.lo + h.t.hi) / 2)}">${Math.round(h.t.lo) === Math.round(h.t.hi) ? '' : `${Math.round(h.t.lo)}–`}${Math.round(h.t.hi)}°</span>` : ''}
-      ${h.r ? `<span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span>` : '<span class="rchip">–</span>'}</li>`).join('')}</ul>`;
+      ${h.r ? `<span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span>` : '<span class="rchip">–</span>'}</li>`).join('')}</ul>
+    ${hits.length > FINDER_SHORT && !state.finderAll ? `<button class="linkbtn f-more" data-more>הצג את כל ${hits.length} היעדים</button>` : ''}`;
 }
 function openFinder(open) {
   $('#finder').hidden = !open;
@@ -1550,14 +1542,22 @@ $('#finderBtn').addEventListener('click', () => {
 });
 $('#fMap').addEventListener('click', () => { $('#finder').hidden = true; document.body.classList.remove('finder-open'); });
 $('#fClose').addEventListener('click', () => openFinder(false));
-$('#finder').addEventListener('change', runFinder);
+$('#finder').addEventListener('change', () => { state.finderAll = false; runFinder(); });
+const PRESETS = { sun: [26, 34], mild: [16, 26], snow: [-15, 2] };
+$('#finder .f-presets').addEventListener('click', e => {
+  const p = PRESETS[e.target.closest('[data-preset]')?.dataset.preset]; if (!p) return;
+  [$('#fTmin').value, $('#fTmax').value] = p;
+  $('#fTempOn').checked = true; $('#fDays').value = 'most';
+  state.finderAll = false; runFinder();
+});
 // number fields update the results while typing, not only when the field loses focus
 let finderTimer;
 $('#finder').addEventListener('input', e => {
   if (e.target.type !== 'number') return;
-  clearTimeout(finderTimer); finderTimer = setTimeout(runFinder, 350);
+  clearTimeout(finderTimer); finderTimer = setTimeout(() => { state.finderAll = false; runFinder(); }, 350);
 });
 $('#fResults').addEventListener('click', e => {
+  if (e.target.closest('[data-more]')) { state.finderAll = true; $('#fResults .f-list').classList.remove('short'); e.target.remove(); return; }
   const iso = e.target.closest('[data-iso]')?.dataset.iso;
   if (iso && state.features[iso]) selectCountry(iso, { zoom: true });
   else if (iso) fitCountry(iso);   // an area without a country panel: just show it

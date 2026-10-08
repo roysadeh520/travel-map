@@ -1,6 +1,7 @@
 # Refreshes the data files and commits them if anything changed:
 #   daily  – NSC travel warnings (gov.il)
 #   weekly – practical info (visa, emergency numbers, plugs…)
+#   yearly – climate normals for the heat map and the finder (NASA POWER)
 name: Update data
 on:
   schedule:
@@ -29,6 +30,12 @@ jobs:
         continue-on-error: true
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.weekly }}" = "true" ] || [ "$(date -u +%u)" = "7" ]; then node scripts/update-practical.mjs; fi
+      - name: Climate normals (yearly on 15 January, or manual)
+        # NASA POWER's 20-year averages barely move; a yearly rebuild picks up their newest period
+        continue-on-error: true
+        timeout-minutes: 60
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.weekly }}" = "true" ] || [ "$(date -u +%m%d)" = "0115" ]; then node scripts/build-climate.mjs; fi
       - name: Commit
         run: |
           git config user.name "data-bot"
