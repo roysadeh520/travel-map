@@ -145,24 +145,30 @@ main { position: relative; flex: 1; min-height: 0; }
   border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 4px 10px; font-size: 13px;
 }
 .p-actions button:hover { border-color: var(--accent); color: var(--accent); }
-/* trip row: destination city + flights / hotels links */
+/* trip row: destination + flights / hotels links, always one line (a long name is cut, the buttons never wrap) */
 .trip {
-  display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 8px 0 2px;
+  display: flex; align-items: center; gap: 6px; margin: 8px 0 2px; flex-wrap: wrap;
   background: var(--accent-soft); border-radius: 10px; padding: 7px 8px;
 }
-.trip label { flex: 0 1 auto; font-weight: 600; font-size: 13px; white-space: nowrap; }
-#tripFlights { margin-inline-start: auto; }
+.trip label { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 5px; font-weight: 600; font-size: 13px; white-space: nowrap; }
 .trip select {
+  flex: 0 1 auto; min-width: 0; max-width: 100%; text-overflow: ellipsis;
   font: inherit; font-weight: 600; color: var(--accent); border: 1px solid var(--line); border-radius: 7px;
-  background: var(--surface); padding: 2px 1px; max-width: 130px;
+  background: var(--surface); padding: 2px 2px;
 }
-.trip a {
-  border-radius: 8px; padding: 5px 8px; font-size: 13px; font-weight: 600; text-decoration: none;
-  background: var(--accent); color: #fff; white-space: nowrap;
+.trip-btns { flex: none; display: flex; gap: 6px; }
+.trip-btns a {
+  border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 4px 10px; font-size: 13px;
+  color: inherit; text-decoration: none; white-space: nowrap;
 }
-.trip a:hover { filter: brightness(1.1); }
+.trip-btns a:hover { border-color: var(--accent); color: var(--accent); }
 .trip .meta { flex-basis: 100%; }
-@media (max-width: 760px) { .trip select { font-size: 16px; } }   /* 16px: no auto-zoom on focus */
+@media (max-width: 760px) {
+  .trip select { font-size: 16px; }   /* 16px: no auto-zoom on focus */
+  .trip .pin { display: none; }       /* room for the city name */
+  .trip-btns { gap: 4px; }
+  .trip-btns a { padding: 4px 7px; }
+}
 section.card { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 14px; }
 section.card h3 { margin: 0 0 8px; font-size: 15px; display: flex; align-items: center; gap: 6px; }
 section.card .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
@@ -445,7 +451,8 @@ body.finder-open #legend { display: none; }
   #close { position: sticky; top: 0; z-index: 2; box-shadow: var(--shadow); width: 36px; height: 36px; }
   .f-head { position: sticky; top: -14px; background: var(--surface); padding: 6px 0; z-index: 2; gap: 8px; }
   .f-head h3 { flex: 1; }
-  .f-map { display: block; border: 1px solid var(--line); background: var(--accent-soft); color: var(--accent); border-radius: 8px; padding: 4px 10px; font-size: 13px; }
+  .f-head .f-map { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: var(--accent-soft); font-size: 18px; }
+  .f-head #fClose { width: 36px; height: 36px; }
 }
 .f-why { font-size: 12px; color: #8a4600; background: #fff4e5; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
 .f-ev { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; }

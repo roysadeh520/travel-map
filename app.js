@@ -93,6 +93,7 @@ const state = {
   ctemps: null,         // { key, temps } per-country temperature for the finder
   events: [],
   cities: [],           // [he, en, iso2, lat, lon, pop] — Natural Earth, for Hebrew search
+  dests: [],            // [he, en, iso2, lat, lon, iata] — hand-picked tourist spots (islands, resorts…)
 };
 const cache = new Map();
 
@@ -942,13 +943,17 @@ const AFFILIATE = {
   skyscannerWrap: '', // tracking-link template from Skyscanner's partner programme, with {url} for the target
 };
 const yymmdd = d => d.slice(2).replace(/-/g, '');
-// the country's biggest cities, plus the searched/clicked one; picks the destination
+// destination choices: the country's biggest cities and its tourist spots (data/destinations.json);
+// the default is the searched/clicked place, else the capital
 function tripCities(iso2) {
-  const list = state.cities.filter(c => c[2] === iso2).slice(0, 8);
+  const spots = state.dests.filter(c => c[2] === iso2);
+  const spotNames = new Set(spots.map(c => c[1]));
+  const all = [...state.cities.filter(c => c[2] === iso2 && !spotNames.has(c[1])), ...spots];
+  const cities = all.filter(c => !spots.includes(c)).slice(0, spots.length ? 6 : 8);
   const near = (lat, lon, km) => {
     let best = null, bestKm = km;
-    for (const c of state.cities) {
-      if (c[2] !== iso2 || Math.abs(c[3] - lat) > 1 || Math.abs(c[4] - lon) > 1.5) continue;
+    for (const c of all) {
+      if (Math.abs(c[3] - lat) > 1 || Math.abs(c[4] - lon) > 1.5) continue;
       const d = kmBetween({ lat, lon }, { lat: c[3], lon: c[4] });
       if (d < bestKm) { bestKm = d; best = c; }
     }
@@ -956,9 +961,9 @@ function tripCities(iso2) {
   };
   const pt = state.point, cap = state.info[iso2]?.cap;
   let dest = state.trip?.iso2 === iso2 && state.trip.point === pt ? state.trip.city : null;
-  dest ||= (pt && pt.label !== 'מרכז המדינה' && near(pt.lat, pt.lon, 60)) || (cap && near(cap[0], cap[1], 40)) || list[0];
-  if (dest && !list.includes(dest)) list.unshift(dest);
-  return { list, dest };
+  dest ||= (pt && pt.label !== 'מרכז המדינה' && near(pt.lat, pt.lon, 60)) || (cap && near(cap[0], cap[1], 40)) || cities[0] || spots[0];
+  if (dest && !cities.includes(dest) && !spots.includes(dest)) cities.unshift(dest);
+  return { cities, spots, dest };
 }
 // the main airport of cities with several (or a small one closer than the main one)
 const MAIN_AIRPORT = {
@@ -985,7 +990,7 @@ function nearestAirport(lat, lon, iso2) {
 }
 function tripLinks(iso2, city) {
   const from = state.from, to = state.to > state.from ? state.to : addDays(state.from, 1);
-  const iata = city && (MAIN_AIRPORT[city[1]] || (state.airports && nearestAirport(city[3], city[4], iso2)));
+  const iata = city && ((typeof city[5] === 'string' && city[5]) || MAIN_AIRPORT[city[1]] || (state.airports && nearestAirport(city[3], city[4], iso2)));
   let flights = `https://www.skyscanner.co.il/transport/flights/tlv/${(iata || iso2).toLowerCase()}/${yymmdd(from)}/${yymmdd(state.to)}/`;
   if (AFFILIATE.skyscannerWrap) flights = AFFILIATE.skyscannerWrap.replace('{url}', encodeURIComponent(flights));
   const q = new URLSearchParams({ ss: city ? `${city[1]}, ${state.features[iso2].properties.en}` : state.features[iso2].properties.en,
@@ -995,14 +1000,20 @@ function tripLinks(iso2, city) {
 }
 function tripRow(iso2) {
   if (iso2 === 'IL' || !state.cities.length) return '';
-  const { list, dest } = tripCities(iso2);
+  const { cities, spots, dest } = tripCities(iso2);
+  const list = [...cities, ...spots];
   state.trip = { iso2, point: state.point, city: dest, list };
   const l = tripLinks(iso2, dest);
+  const opts = (arr, offset) => arr.map((c, i) => `<option value="${i + offset}"${c === dest ? ' selected' : ''}>${esc(c[0])}</option>`).join('');
+  const select = spots.length
+    ? `<optgroup label="ערים">${opts(cities, 0)}</optgroup><optgroup label="יעדי תיירות">${opts(spots, cities.length)}</optgroup>`
+    : opts(cities, 0);
   return `<div class="trip">
-    <label>📍 חופשה ב־<select id="tripCity" aria-label="עיר יעד">${list.map((c, i) =>
-      `<option value="${i}"${c === dest ? ' selected' : ''}>${esc(c[0])}</option>`).join('')}</select></label>
-    <a id="tripFlights" href="${esc(l.flights)}" target="_blank" rel="noopener sponsored">✈️ טיסות</a>
-    <a id="tripHotels" href="${esc(l.hotels)}" target="_blank" rel="noopener sponsored">🏨 מלונות</a>
+    <label><span class="pin">📍</span> חופשה ב־<select id="tripCity" aria-label="יעד">${select}</select></label>
+    <span class="trip-btns">
+      <a id="tripFlights" href="${esc(l.flights)}" target="_blank" rel="noopener sponsored">✈️ טיסות</a>
+      <a id="tripHotels" href="${esc(l.hotels)}" target="_blank" rel="noopener sponsored">🏨 מלונות</a>
+    </span>
     ${AFFILIATE.bookingAid || AFFILIATE.skyscannerWrap ? '<div class="meta">קישורי שותפים: ייתכן שנקבל עמלה, בלי עלות נוספת לכם</div>' : ''}
   </div>`;
 }
@@ -1010,9 +1021,9 @@ function tripRow(iso2) {
 function refreshTrip() {
   const iso2 = state.selected;
   if (!iso2 || $('#panel').hidden) return;
-  if (!$('#tripCity')) return $('#panelBody .p-actions')?.insertAdjacentHTML('afterend', tripRow(iso2));
-  const l = tripLinks(iso2, state.trip.city);
-  $('#tripFlights').href = l.flights; $('#tripHotels').href = l.hotels;
+  const old = $('#panelBody .trip');
+  if (old) old.outerHTML = tripRow(iso2);
+  else $('#panelBody .p-actions')?.insertAdjacentHTML('afterend', tripRow(iso2));
 }
 $('#panelBody').addEventListener('change', e => {
   if (e.target.id !== 'tripCity' || !state.trip) return;
@@ -1131,10 +1142,11 @@ function localMatches(text) {
 function cityMatches(text) {
   const t = text.trim().toLowerCase();
   if (t.length < 2) return [];
-  // state.cities is sorted by population, so the first hits are the biggest cities
-  return state.cities.filter(c => wordStart(c[0], t) || wordStart(c[1], t)).slice(0, 5).map(([he, en, iso2, lat, lon]) => ({
-    icon: '🏙️', title: he, sub: `${en} · ${nameHe(iso2, iso2)}`, lat, lon, zoom: 11, iso2,
-  }));
+  // tourist spots first, then cities (state.cities is sorted by population, so the biggest come first)
+  const hit = c => wordStart(c[0], t) || wordStart(c[1], t);
+  const spots = state.dests.filter(hit), names = new Set(spots.map(c => c[1]));
+  return [...spots.map(c => ['🏝️', c]), ...state.cities.filter(c => hit(c) && !names.has(c[1])).map(c => ['🏙️', c])]
+    .slice(0, 5).map(([icon, [he, en, iso2, lat, lon]]) => ({ icon, title: he, sub: `${en} · ${nameHe(iso2, iso2)}`, lat, lon, zoom: 11, iso2 }));
 }
 const fromPhoton = f => {
   const p = f.properties, [lon, lat] = f.geometry.coordinates;
@@ -1487,6 +1499,7 @@ function readHash() {
   state.anti = anti.countries; state.antiMeta = anti._meta || {};
   state.events = events.events;
   fetch('data/cities.json').then(r => r.json()).then(c => { state.cities = c; drawLabels(); refreshTrip(); }).catch(() => {});
+  fetch('data/destinations.json').then(r => r.json()).then(d => { state.dests = d.places; refreshTrip(); }).catch(() => {});
   fetch('data/airports.json').then(r => r.json()).then(a => { state.airports = a.airports; refreshTrip(); }).catch(() => {});
   for (const f of geo.features) if (f.properties.iso2 && !state.features[f.properties.iso2]) state.features[f.properties.iso2] = f;
   labelFeatures = geo.features.filter(f => (f.properties.iso2 || AREA_NAMES[f.properties.a3]) && f.properties.lx != null)
