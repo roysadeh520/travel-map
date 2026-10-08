@@ -935,6 +935,92 @@ function eventsCard(iso2) {
 }
 
 let panelToken = 0;
+// ---------- trip: flights (Skyscanner) & hotels (Booking) to a city ----------
+// Affiliate IDs go here once approved; with them empty the links are plain links.
+const AFFILIATE = {
+  bookingAid: '',     // Booking.com affiliate id (aid)
+  skyscannerWrap: '', // tracking-link template from Skyscanner's partner programme, with {url} for the target
+};
+const yymmdd = d => d.slice(2).replace(/-/g, '');
+// the country's biggest cities, plus the searched/clicked one; picks the destination
+function tripCities(iso2) {
+  const list = state.cities.filter(c => c[2] === iso2).slice(0, 8);
+  const near = (lat, lon, km) => {
+    let best = null, bestKm = km;
+    for (const c of state.cities) {
+      if (c[2] !== iso2 || Math.abs(c[3] - lat) > 1 || Math.abs(c[4] - lon) > 1.5) continue;
+      const d = kmBetween({ lat, lon }, { lat: c[3], lon: c[4] });
+      if (d < bestKm) { bestKm = d; best = c; }
+    }
+    return best;
+  };
+  const pt = state.point, cap = state.info[iso2]?.cap;
+  let dest = state.trip?.iso2 === iso2 && state.trip.point === pt ? state.trip.city : null;
+  dest ||= (pt && pt.label !== 'מרכז המדינה' && near(pt.lat, pt.lon, 60)) || (cap && near(cap[0], cap[1], 40)) || list[0];
+  if (dest && !list.includes(dest)) list.unshift(dest);
+  return { list, dest };
+}
+// the main airport of cities with several (or a small one closer than the main one)
+const MAIN_AIRPORT = {
+  Paris: 'CDG', Rome: 'FCO', 'Vatican City': 'FCO', Milan: 'MXP', Bangkok: 'BKK', Nicosia: 'LCA', 'New York City': 'JFK',
+  Istanbul: 'IST', Moscow: 'SVO', Washington: 'IAD', Chicago: 'ORD', Stockholm: 'ARN', 'São Paulo': 'GRU',
+  'Buenos Aires': 'EZE', 'Rio de Janeiro': 'GIG', 'Andorra la Vella': 'BCN', Seoul: 'ICN', Shanghai: 'PVG',
+  Beijing: 'PEK', Osaka: 'KIX', Tokyo: 'NRT', Toronto: 'YYZ', Montreal: 'YUL', Dubai: 'DXB', Bucharest: 'OTP',
+  Taipei: 'TPE', Jakarta: 'CGK', 'Kuala Lumpur': 'KUL', Houston: 'IAH', Bern: 'ZRH', Vaduz: 'ZRH',
+  Pretoria: 'JNB', 'San Marino': 'BLQ',
+};
+const SKIP_AIRPORTS = new Set(['ECN']);   // Ercan, northern Cyprus – not reachable on a normal itinerary from Israel
+// nearest airport with scheduled flights within 150 km (a large one unless a medium one is much closer),
+// else the country's nearest airport at any distance
+function nearestAirport(lat, lon, iso2) {
+  let best = null, bestScore = Infinity, inCountry = null, inCountryKm = Infinity;
+  for (const [iata, alat, alon, size, cc] of state.airports) {
+    if (SKIP_AIRPORTS.has(iata) || (cc !== iso2 && (Math.abs(alat - lat) > 2 || Math.abs(alon - lon) > 3))) continue;
+    const km = kmBetween({ lat, lon }, { lat: alat, lon: alon });
+    const score = size === 2 ? km : km + 60;
+    if (km <= 150 && score < bestScore) { bestScore = score; best = iata; }
+    if (cc === iso2 && km < inCountryKm) { inCountryKm = km; inCountry = iata; }
+  }
+  return best || inCountry;
+}
+function tripLinks(iso2, city) {
+  const from = state.from, to = state.to > state.from ? state.to : addDays(state.from, 1);
+  const iata = city && (MAIN_AIRPORT[city[1]] || (state.airports && nearestAirport(city[3], city[4], iso2)));
+  let flights = `https://www.skyscanner.co.il/transport/flights/tlv/${(iata || iso2).toLowerCase()}/${yymmdd(from)}/${yymmdd(state.to)}/`;
+  if (AFFILIATE.skyscannerWrap) flights = AFFILIATE.skyscannerWrap.replace('{url}', encodeURIComponent(flights));
+  const q = new URLSearchParams({ ss: city ? `${city[1]}, ${state.features[iso2].properties.en}` : state.features[iso2].properties.en,
+    checkin: from, checkout: to, group_adults: 2, no_rooms: 1, group_children: 0 });
+  if (AFFILIATE.bookingAid) q.set('aid', AFFILIATE.bookingAid);
+  return { flights, hotels: `https://www.booking.com/searchresults.he.html?${q}`, iata };
+}
+function tripRow(iso2) {
+  if (iso2 === 'IL' || !state.cities.length) return '';
+  const { list, dest } = tripCities(iso2);
+  state.trip = { iso2, point: state.point, city: dest, list };
+  const l = tripLinks(iso2, dest);
+  return `<div class="trip">
+    <label>📍 חופשה ב־<select id="tripCity" aria-label="עיר יעד">${list.map((c, i) =>
+      `<option value="${i}"${c === dest ? ' selected' : ''}>${esc(c[0])}</option>`).join('')}</select></label>
+    <a id="tripFlights" href="${esc(l.flights)}" target="_blank" rel="noopener sponsored">✈️ טיסות</a>
+    <a id="tripHotels" href="${esc(l.hotels)}" target="_blank" rel="noopener sponsored">🏨 מלונות</a>
+    ${AFFILIATE.bookingAid || AFFILIATE.skyscannerWrap ? '<div class="meta">קישורי שותפים: ייתכן שנקבל עמלה, בלי עלות נוספת לכם</div>' : ''}
+  </div>`;
+}
+// cities and airports load after the first paint: fill in a panel that is already open
+function refreshTrip() {
+  const iso2 = state.selected;
+  if (!iso2 || $('#panel').hidden) return;
+  if (!$('#tripCity')) return $('#panelBody .p-actions')?.insertAdjacentHTML('afterend', tripRow(iso2));
+  const l = tripLinks(iso2, state.trip.city);
+  $('#tripFlights').href = l.flights; $('#tripHotels').href = l.hotels;
+}
+$('#panelBody').addEventListener('change', e => {
+  if (e.target.id !== 'tripCity' || !state.trip) return;
+  state.trip.city = state.trip.list[+e.target.value];
+  const l = tripLinks(state.trip.iso2, state.trip.city);
+  $('#tripFlights').href = l.flights; $('#tripHotels').href = l.hotels;
+});
+
 async function renderPanel() {
   const iso2 = state.selected; if (!iso2) return;
   const token = ++panelToken;
@@ -961,6 +1047,7 @@ async function renderPanel() {
       <button data-act="share">📤 שיתוף</button>
       <button data-act="pdf">📄 הורדה כ־PDF</button>
     </div>
+    ${tripRow(iso2)}
     ${riskCard(iso2)}
     ${nscNote(iso2)}
     <div class="daterange">📆 ${dmy(state.from)} – ${dmy(state.to)}</div>
@@ -1399,7 +1486,8 @@ function readHash() {
   state.info = info;
   state.anti = anti.countries; state.antiMeta = anti._meta || {};
   state.events = events.events;
-  fetch('data/cities.json').then(r => r.json()).then(c => { state.cities = c; drawLabels(); }).catch(() => {});
+  fetch('data/cities.json').then(r => r.json()).then(c => { state.cities = c; drawLabels(); refreshTrip(); }).catch(() => {});
+  fetch('data/airports.json').then(r => r.json()).then(a => { state.airports = a.airports; refreshTrip(); }).catch(() => {});
   for (const f of geo.features) if (f.properties.iso2 && !state.features[f.properties.iso2]) state.features[f.properties.iso2] = f;
   labelFeatures = geo.features.filter(f => (f.properties.iso2 || AREA_NAMES[f.properties.a3]) && f.properties.lx != null)
     .sort((a, b) => a.properties.rank - b.properties.rank || a.properties.minz - b.properties.minz);

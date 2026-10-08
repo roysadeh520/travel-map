@@ -145,6 +145,24 @@ main { position: relative; flex: 1; min-height: 0; }
   border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 4px 10px; font-size: 13px;
 }
 .p-actions button:hover { border-color: var(--accent); color: var(--accent); }
+/* trip row: destination city + flights / hotels links */
+.trip {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 8px 0 2px;
+  background: var(--accent-soft); border-radius: 10px; padding: 7px 8px;
+}
+.trip label { flex: 0 1 auto; font-weight: 600; font-size: 13px; white-space: nowrap; }
+#tripFlights { margin-inline-start: auto; }
+.trip select {
+  font: inherit; font-weight: 600; color: var(--accent); border: 1px solid var(--line); border-radius: 7px;
+  background: var(--surface); padding: 2px 1px; max-width: 130px;
+}
+.trip a {
+  border-radius: 8px; padding: 5px 8px; font-size: 13px; font-weight: 600; text-decoration: none;
+  background: var(--accent); color: #fff; white-space: nowrap;
+}
+.trip a:hover { filter: brightness(1.1); }
+.trip .meta { flex-basis: 100%; }
+@media (max-width: 760px) { .trip select { font-size: 16px; } }   /* 16px: no auto-zoom on focus */
 section.card { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 14px; }
 section.card h3 { margin: 0 0 8px; font-size: 15px; display: flex; align-items: center; gap: 6px; }
 section.card .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
