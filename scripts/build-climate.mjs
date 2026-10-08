@@ -1,10 +1,12 @@
 // Builds data/climate.json: the average daily high for every month on a 1° land grid, from NASA POWER's
 // climatology (MERRA-2, 2001–2020). Daily high ≈ mean temperature (T2M) + half the mean daily range (T2M_RANGE).
 // The heat map, the destination finder and the panel's "normal" line read this file, so they need no live
-// weather requests and always agree. Run once (or yearly): node scripts/build-climate.mjs   (~10–15 min)
+// weather requests and always agree. Also writes data/climate-extra.json (same nodes): the average daily low
+// (T2M − T2M_RANGE/2) and rain (PRECTOTCORR, mm a day), which the panel shows when the weather service is
+// unavailable. Run once (or yearly): node scripts/build-climate.mjs   (~40 min)
 import { readFile, writeFile } from 'node:fs/promises';
 
-const OUT = new URL('../data/climate.json', import.meta.url);
+const OUT = new URL('../data/climate.json', import.meta.url), OUT_EXTRA = new URL('../data/climate-extra.json', import.meta.url);
 const NORTH = 84, SOUTH = -56, STEP = 1;
 const ROWS = (NORTH - SOUTH) / STEP + 1, COLS = 360;
 const UA = 'travel-map-updater/0.1 (https://github.com/roysadeh520/travel-map)';
@@ -53,6 +55,7 @@ console.log(`${keep.reduce((s, x) => s + x, 0)} grid nodes to fill`);
 // POWER's regional climatology covers up to 10°×10° per request on its native 0.5°×0.625° grid;
 // each native point is averaged into the nearest 1° node
 const sum = new Float64Array(ROWS * COLS * 12), cnt = new Uint16Array(ROWS * COLS);
+const sumLo = new Float64Array(ROWS * COLS * 12), sumRain = new Float64Array(ROWS * COLS * 12);
 let boxes = 0, failed = 0;
 for (let lat = SOUTH - 1; lat < NORTH; lat += 10) for (let lon = -180; lon < 180; lon += 10) {
   const r0 = Math.max(0, Math.floor((NORTH - Math.min(lat + 10, 90)) / STEP)), r1 = Math.min(ROWS - 1, Math.ceil((NORTH - lat) / STEP));
@@ -74,18 +77,19 @@ box ${lat},${lon} ${param}: ${e.message}`); await sleep(4000 * (attempt + 1)); }
     }
     return null;
   };
-  const tF = await get('T2M'), rF = await get('T2M_RANGE');
-  if (!tF || !rF) { failed++; continue; }
-  const rangeAt = new Map(rF.map(f => [f.geometry.coordinates.slice(0, 2).join(','), f.properties.parameter.T2M_RANGE]));
-  const data = { features: tF.map(f => ({ geometry: f.geometry, properties: { parameter: {
-    T2M: f.properties.parameter.T2M, T2M_RANGE: rangeAt.get(f.geometry.coordinates.slice(0, 2).join(',')) || {} } } })) };
+  const tF = await get('T2M'), rF = await get('T2M_RANGE'), pF = await get('PRECTOTCORR');
+  if (!tF || !rF || !pF) { failed++; continue; }
+  const at = (F, p) => new Map(F.map(f => [f.geometry.coordinates.slice(0, 2).join(','), f.properties.parameter[p]]));
+  const rangeAt = at(rF, 'T2M_RANGE'), rainAt = at(pF, 'PRECTOTCORR');
+  const data = { features: tF.map(f => { const k = f.geometry.coordinates.slice(0, 2).join(','); return { geometry: f.geometry,
+    properties: { parameter: { T2M: f.properties.parameter.T2M, T2M_RANGE: rangeAt.get(k) || {}, RAIN: rainAt.get(k) || {} } } }; }) };
   for (const f of data.features) {
-    const [plon, plat] = f.geometry.coordinates, t = f.properties.parameter.T2M, rg = f.properties.parameter.T2M_RANGE;
+    const [plon, plat] = f.geometry.coordinates, t = f.properties.parameter.T2M, rg = f.properties.parameter.T2M_RANGE, pr = f.properties.parameter.RAIN;
     const r = Math.round((NORTH - plat) / STEP), c = ((Math.round(plon + 180) % COLS) + COLS) % COLS;
     if (r < 0 || r >= ROWS || !keep[r * COLS + c]) continue;
     const i = r * COLS + c;
-    if (MONTHS.some(m => t[m] == null || t[m] < -900 || rg[m] == null || rg[m] < -900)) continue;
-    MONTHS.forEach((m, k) => { sum[i * 12 + k] += t[m] + rg[m] / 2; });
+    if (MONTHS.some(m => t[m] == null || t[m] < -900 || rg[m] == null || rg[m] < -900 || pr[m] == null || pr[m] < -900)) continue;
+    MONTHS.forEach((m, k) => { sum[i * 12 + k] += t[m] + rg[m] / 2; sumLo[i * 12 + k] += t[m] - rg[m] / 2; sumRain[i * 12 + k] += pr[m]; });
     cnt[i]++;
   }
   process.stdout.write(`\rboxes ${boxes} (failed ${failed})`);
@@ -94,16 +98,26 @@ box ${lat},${lon} ${param}: ${e.message}`); await sleep(4000 * (attempt + 1)); }
 console.log();
 
 // compact output: node indexes and, per node, 12 monthly highs rounded to 0.5°C (stored ×2 as integers)
-const idx = [], vals = [];
+const idx = [], vals = [], lows = [], rain = [];
 for (let i = 0; i < ROWS * COLS; i++) {
   if (!cnt[i]) continue;
   idx.push(i);
-  for (let k = 0; k < 12; k++) vals.push(Math.round(sum[i * 12 + k] / cnt[i] * 2));
+  for (let k = 0; k < 12; k++) {
+    vals.push(Math.round(sum[i * 12 + k] / cnt[i] * 2));
+    lows.push(Math.round(sumLo[i * 12 + k] / cnt[i] * 2));
+    rain.push(Math.round(sumRain[i * 12 + k] / cnt[i] * 10));
+  }
 }
 if (failed > boxes / 10) { console.error(`${failed}/${boxes} boxes failed – not writing`); process.exit(1); }
 await writeFile(OUT, JSON.stringify({
   _meta: { source: 'NASA POWER climatology (MERRA-2, 2001–2020) – average daily high = T2M + T2M_RANGE/2',
     built: new Date().toISOString().slice(0, 10), north: NORTH, west: -180, step: STEP, rows: ROWS, cols: COLS, scale: 2 },
   i: idx, v: vals,
+}));
+// same node order as climate.json (its "i"): lows ×2 and rain in tenths of a mm a day
+await writeFile(OUT_EXTRA, JSON.stringify({
+  _meta: { source: 'NASA POWER climatology (MERRA-2, 2001–2020) – average daily low = T2M − T2M_RANGE/2, rain = PRECTOTCORR',
+    built: new Date().toISOString().slice(0, 10), nodes: 'as in climate.json', loScale: 2, rainScale: 10 },
+  lo: lows, rain,
 }));
 console.log(`${idx.length} nodes written`);

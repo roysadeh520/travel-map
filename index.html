@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <!-- bump ?v= on every release so browsers don't keep a stale copy (GitHub Pages caches for 10 min) -->
-<link rel="stylesheet" href="style.css?v=2026100816">
+<link rel="stylesheet" href="style.css?v=2026100824">
 </head>
 <body>
 <header class="topbar">
@@ -62,12 +62,13 @@
       <button data-preset="mild" title="16°–26° ברוב הימים">🌤️ נעים לטיולים</button>
       <button data-preset="snow" title="עד 2° ברוב הימים">❄️ שלג</button>
     </div>
-    <label class="chk"><input type="checkbox" id="fTempOn" checked> טמפ׳ ביום בין
+    <label class="chk" title="לפי הטמפ׳ הרגילה בכל יום בטווח (ממוצע רב־שנתי) – בבירה, בערים מרכזיות במדינות גדולות וביעדי תיירות"><input type="checkbox" id="fTempOn" checked> טמפ׳ ביום בין
       <input type="number" id="fTmin" value="18" min="-30" max="45"> ל־<input type="number" id="fTmax" value="30" min="-30" max="45">°</label>
-    <label class="row f-days">ב־<select id="fDays"><option value="any">לפחות יום אחד</option><option value="most" selected>רוב הימים</option><option value="all">כל הימים</option></select></label>
-    <div class="f-hint">לפי הטמפ׳ הרגילה בכל יום בטווח (ממוצע רב־שנתי) – בבירה, בערים מרכזיות במדינות גדולות וביעדי תיירות</div>
-    <label class="row">מדד סיכון עד
+    <div class="f-pair">
+    <label class="row f-days" title="לפי הטמפ׳ הרגילה בכל יום בטווח (ממוצע רב־שנתי) – בבירה, בערים מרכזיות במדינות גדולות וביעדי תיירות">ב־<select id="fDays"><option value="any">לפחות יום אחד</option><option value="most" selected>רוב הימים</option><option value="all">כל הימים</option></select></label>
+    <label class="row" title="מדד הסיכון ליהודים ולישראלים">סיכון עד
       <select id="fRisk"><option value="20">נמוך</option><option value="40" selected>נמוך־בינוני</option><option value="60">בינוני</option><option value="101">הכל</option></select></label>
+    </div>
     <label class="chk"><input type="checkbox" id="fVisa"> בלי ויזה מראש (פטור, בהגעה או ETA)</label>
     <label class="chk"><input type="checkbox" id="fEvents"> רק עם אירוע בתאריכים</label>
     <div id="fResults"></div>
@@ -83,6 +84,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/he.min.js"></script>
-<script src="app.js?v=2026100816"></script>
+<script src="app.js?v=2026100824"></script>
 </body>
 </html>

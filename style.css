@@ -145,22 +145,34 @@ main { position: relative; flex: 1; min-height: 0; }
   position: sticky; top: 0; float: left;
   border: 0; background: var(--bg); width: 30px; height: 30px; border-radius: 50%; color: var(--muted);
 }
-.p-head { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
-.p-head img { width: 52px; border-radius: 4px; box-shadow: 0 0 0 1px var(--line); }
-.p-head h2 { margin: 0; font-size: 22px; }
-.p-head .en { color: var(--muted); font-size: 13px; }
+.p-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.p-head img { width: 38px; flex: none; border-radius: 4px; box-shadow: 0 0 0 1px var(--line); }
+/* the name gives way (a long one wraps) so the dates always stay on its row */
+.p-head > div:not(.p-dates) { flex: 1 1 auto; min-width: 0; }
+.p-head h2 { margin: 0; font-size: 22px; line-height: 1.2; }   /* wraps between words only */
+.p-head h2.mid { font-size: 18px; }
+.p-head h2.long { font-size: 15px; }
+.p-head .en { color: var(--muted); font-size: 12.5px; line-height: 1.3; }
 /* the panel's own dates, at the head's left end; editing them changes this country only */
-.p-head { flex-wrap: wrap; }   /* on a narrow screen the dates drop below the name instead of running under ✕ */
-.p-dates { margin-inline-start: auto; margin-inline-end: 12px; display: flex; align-items: center; gap: 4px; position: relative; }
+.p-dates { flex: none; margin-inline-start: auto; margin-inline-end: 6px; display: flex; align-items: center; gap: 4px; position: relative; }
 /* same look as the map's date field */
 .p-dates input {
-  width: 150px; font: inherit; font-size: 13px; padding: 5px 4px; border: 1px solid var(--line); border-radius: 8px;
+  box-sizing: border-box; width: 160px; font: inherit; font-size: 13px; padding: 5px 21px 5px 3px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--bg); color: inherit; cursor: pointer; direction: ltr; text-align: center;
 }
 .p-dates input:hover { border-color: var(--accent); }
+/* a small pencil inside the field: it can be edited */
+.p-dates .pencil { position: absolute; right: 7px; top: 50%; width: 12px; height: 12px; margin-top: -6px; color: var(--muted); pointer-events: none; }
+.p-dates.custom .pencil { color: #8a4600; }
 .p-dates.custom input { background: #fff4e5; color: #8a4600; border-color: #f3c58b; }
-.p-dates-reset { border: 0; background: none; color: #8a4600; font-size: 16px; padding: 0 2px; cursor: pointer; }
+/* ↺ sits inside the field's left end, so the name keeps its room */
+.p-dates.custom input { width: 172px; padding-left: 21px; }
+.p-dates-reset {
+  position: absolute; left: 3px; top: 50%; transform: translateY(-50%); z-index: 1;
+  border: 0; background: none; color: #8a4600; font-size: 15px; line-height: 1; padding: 3px; cursor: pointer;
+}
 .p-dates .flatpickr-calendar.static { left: 0; right: auto; z-index: 5; }
+.flatpickr-calendar { touch-action: manipulation; }   /* two quick taps on dates are not a double-tap zoom */
 .p-actions { display: flex; gap: 6px; margin: 10px 0 4px; flex-wrap: wrap; }
 .p-actions button {
   border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 4px 10px; font-size: 13px;
@@ -214,8 +226,6 @@ dl.facts dd { margin: 0; }
 table.wx { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.wx td, table.wx th { padding: 5px 4px; border-bottom: 1px solid var(--line); text-align: right; }
 table.wx th { color: var(--muted); font-weight: 400; font-size: 12px; }
-table.wx .hi { color: #c2410c; font-weight: 500; }
-table.wx .lo { color: #2563eb; }
 .wxsum { display: flex; gap: 14px; margin-bottom: 8px; font-size: 14px; }
 .wxsum b { font-size: 20px; }
 
@@ -361,6 +371,7 @@ span.flatpickr-weekday { color: var(--muted); font-weight: 500; font-size: 12px;
 table.wx.cities tr { cursor: pointer; }
 table.wx.cities tr:hover td { background: var(--accent-soft); }
 .tchip { display: inline-block; min-width: 38px; text-align: center; border-radius: 6px; padding: 1px 6px; font-weight: 500; color: #1d2433; }
+.tchip-lo { font-weight: 400; }
 
 /* ---------- Hebrew map labels ---------- */
 .map-label span {
@@ -390,6 +401,7 @@ table.wx tr.more { display: none; }
 table.wx.all tr.more, .print-sheet table.wx tr.more { display: table-row; }
 .wx-normal { font-size: 13px; color: var(--muted); margin: -2px 0 8px; }
 .wx-normal b { color: var(--text); }
+.wx-limit { font-size: 12.5px; color: #8a4600; background: #fff4e5; border-radius: 8px; padding: 6px 8px; margin-bottom: 8px; }
 .wx-more { display: block; margin: 8px auto 0; font-size: 13.5px; font-weight: 600; text-decoration: underline; }
 .pr-grid { display: grid; gap: 10px; margin-top: 10px; }
 .pr-item { background: var(--bg); border-radius: 10px; padding: 10px 12px; }
@@ -404,7 +416,7 @@ ul.list.compact li { padding: 3px 0; font-size: 13px; }
 .finder-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 6px 12px; font-weight: 500; }
 .finder-btn.on, .finder-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 #finder {
-  position: absolute; top: 12px; left: 56px; z-index: 1050; width: 300px; max-height: calc(100% - 24px); overflow-y: auto;
+  position: absolute; top: 12px; left: 56px; z-index: 1050; width: 330px; max-height: calc(100% - 24px); overflow-y: auto;
   background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 12px 14px; font-size: 13.5px;
 }
 .f-head { display: flex; align-items: center; justify-content: space-between; }
@@ -485,13 +497,18 @@ body.finder-open #legend { display: none; }
   .f-head .f-map { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: var(--accent-soft); font-size: 18px; }
   .f-head #fClose { width: 36px; height: 36px; }
 }
-.f-presets { display: flex; gap: 5px; flex-wrap: wrap; margin: 2px 0 8px; }
-.f-presets button { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 3px 9px; font-size: 12.5px; }
+/* the three presets on one row */
+.f-presets { display: flex; gap: 4px; margin: 2px 0 8px; }
+.f-presets button {
+  flex: 1 1 auto; white-space: nowrap; border: 1px solid var(--line); background: var(--bg); border-radius: 8px;
+  padding: 3px 4px; font-size: 12px;
+}
 .f-presets button:hover { border-color: var(--accent); color: var(--accent); }
-.f-days { padding-inline-start: 22px; }
+/* "ב־[days]" and "סיכון עד [risk]" side by side on one row */
+.f-pair { display: flex; align-items: center; gap: 8px; }
+#finder .f-pair label { flex-wrap: nowrap; white-space: nowrap; gap: 4px; }
 .f-list.short li:nth-child(n+16) { display: none; }
 .f-more { display: block; margin: 8px auto 2px; font-size: 13.5px; font-weight: 600; text-decoration: underline; }
-.f-hint { font-size: 11.5px; color: var(--muted); margin: -2px 0 6px 0; padding-inline-start: 22px; }
 .f-city { color: var(--muted); font-size: 11.5px; }
 .f-why { font-size: 12px; color: #8a4600; background: #fff4e5; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
 .f-ev { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; }

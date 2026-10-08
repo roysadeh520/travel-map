@@ -97,7 +97,7 @@ const state = {
   cities: [],           // [he, en, iso2, lat, lon, pop] — Natural Earth, for Hebrew search
   dests: [],            // [he, en, iso2, lat, lon, iata] — hand-picked tourist spots (islands, resorts…)
 };
-const cache = new Map();
+const cache = new Map(), quotaOut = new Map();
 
 // ---------- date helpers ----------
 // dates the country panel shows: its own range if the viewer changed it there, else the map's
@@ -110,14 +110,45 @@ const shiftYears = (s, n) => { const d = parse(s); d.setFullYear(d.getFullYear()
 const today = () => iso(new Date());
 
 // ---------- fetch helpers ----------
+// opts.keep (ms): also keep the answer in this browser for that long, so reopening a country costs no request
+// (weather: Open-Meteo's free quota is per connection)
+const kept = (key, ms) => { try { const e = JSON.parse(localStorage.getItem('c:' + key)); return e && Date.now() - e.t < ms ? e.v : undefined; } catch { return undefined; } };
+function keep(key, v) {
+  const put = () => localStorage.setItem('c:' + key, JSON.stringify({ t: Date.now(), v }));
+  try { put(); } catch {
+    // storage full: drop the kept answers and try once more
+    try { Object.keys(localStorage).filter(k => k.startsWith('c:')).forEach(k => localStorage.removeItem(k)); put(); } catch {}
+  }
+}
 async function getJSON(url, opts) {
   const key = url + (opts?.body || '');
   if (cache.has(key)) return cache.get(key);
-  const p = fetch(url, opts).then(r => {
-    if (r.status === 204 || r.status === 404) return null;
-    if (!r.ok) throw new Error(`${r.status} ${url}`);
-    return r.json();
-  });
+  if (opts?.keep) { const v = kept(key, opts.keep); if (v !== undefined) return v; }
+  // a timeout so nothing waits forever, and two more tries on a rate limit or a network error (a 429 without
+  // CORS headers reaches us as a network error)
+  // an hourly or daily quota that ran out is not retried, and that service is skipped for 10 minutes
+  const host = new URL(url).host;
+  if (Date.now() - (quotaOut.get(host) || 0) < 6e5) return Promise.reject(new Error(`quota ${host}`));
+  const p = (async () => {
+    for (let n = 0; ; n++) {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(15000), ...opts });
+        if (r.status === 204 || r.status === 404) return null;
+        if (r.status === 429) {
+          const why = (await r.json().catch(() => ({}))).reason || '';
+          if (/daily|hourly/i.test(why)) { quotaOut.set(host, Date.now()); throw new Error(`429 ${why}`); }
+          if (n < 2) throw new TypeError('429');
+        }
+        if (!r.ok) throw new Error(`${r.status} ${url}`);
+        const v = await r.json();
+        if (opts?.keep) keep(key, v);
+        return v;
+      } catch (e) {
+        if (!(e instanceof TypeError) || n >= 2) throw e;
+        await new Promise(res => setTimeout(res, 1500 * (n + 1)));
+      }
+    }
+  })();
   cache.set(key, p);
   p.catch(() => cache.delete(key));
   return p;
@@ -149,9 +180,25 @@ function centroid(feature) {
   }
   return { lat: (best[1] + best[3]) / 2, lon: (best[0] + best[2]) / 2 };
 }
+const CAPITAL_HE = { SS: "ג'ובה", EH: 'אל־עיון' };   // capitals missing from the cities list
+// the capitals' Hebrew names: the country data has them in English only, the cities list has Hebrew
+function capitalsHe(iso2) {
+  const i = state.info[iso2], names = i?.capital || [];
+  return names.map((en, k) => state.cities.find(c => c[2] === iso2 && c[1] === en)?.[0]
+    || (k === 0 && i.cap && (nearestCity(i.cap[0], i.cap[1], 30, iso2) || CAPITAL_HE[iso2])) || en);
+}
+const REGION_HE = {
+  'Caribbean': 'הקריביים', 'Southern Asia': 'דרום אסיה', 'Middle Africa': 'מרכז אפריקה', 'Northern Europe': 'צפון אירופה',
+  'Southeast Europe': 'דרום־מזרח אירופה', 'Southern Europe': 'דרום אירופה', 'Western Asia': 'מערב אסיה',
+  'South America': 'דרום אמריקה', 'Polynesia': 'פולינזיה', 'Antarctic': 'אנטארקטיקה', 'Australia and New Zealand': 'אוסטרליה וניו זילנד',
+  'Central Europe': 'מרכז אירופה', 'Eastern Africa': 'מזרח אפריקה', 'Western Europe': 'מערב אירופה', 'Western Africa': 'מערב אפריקה',
+  'Eastern Europe': 'מזרח אירופה', 'Central America': 'מרכז אמריקה', 'North America': 'צפון אמריקה',
+  'South-Eastern Asia': 'דרום־מזרח אסיה', 'Southern Africa': 'דרום אפריקה (אזור)', 'Eastern Asia': 'מזרח אסיה',
+  'Northern Africa': 'צפון אפריקה', 'Melanesia': 'מלנזיה', 'Micronesia': 'מיקרונזיה', 'Central Asia': 'מרכז אסיה',
+};
 function repPoint(iso2) {
   const i = state.info[iso2];
-  if (i?.cap) return { lat: i.cap[0], lon: i.cap[1], label: i.capital?.[0] };
+  if (i?.cap) return { lat: i.cap[0], lon: i.cap[1], label: capitalsHe(iso2)[0] };
   const f = state.features[iso2] || state.areas[iso2];
   return f ? { ...centroid(f), label: 'מרכז המדינה' } : null;
 }
@@ -182,6 +229,8 @@ function weatherPlan(from, to) {
   while (shiftYears(to, n) > addDays(t, -6)) n--;
   return { kind: 'estimate', shift: n, from, to };
 }
+// how long a weather answer is kept: a forecast 2 hours, past data a month
+const wxKeep = kind => ({ keep: kind === 'forecast' ? 72e5 : 2592e6 });
 function wxURL(kind, lats, lons, from, to, daily) {
   const base = kind === 'forecast' ? 'https://api.open-meteo.com/v1/forecast' : 'https://archive-api.open-meteo.com/v1/archive';
   return `${base}?latitude=${lats}&longitude=${lons}&start_date=${from}&end_date=${to}&daily=${daily}&timezone=auto`;
@@ -201,7 +250,7 @@ async function wxSeries(points, daily = 'temperature_2m_max,temperature_2m_min,p
   const asList = r => (Array.isArray(r) ? r : [r]);
   const from = plan.kind === 'estimate' ? shiftYears(plan.from, plan.shift) : plan.from;
   const to = plan.kind === 'estimate' ? shiftYears(plan.to, plan.shift) : plan.to;
-  const runs = [asList(await getJSON(wxURL(plan.kind === 'forecast' ? 'forecast' : 'archive', lats, lons, from, to, daily)))];
+  const runs = [asList(await getJSON(wxURL(plan.kind === 'forecast' ? 'forecast' : 'archive', lats, lons, from, to, daily), wxKeep(plan.kind)))];
   const len = daysBetween(plan.from, plan.to) + 1;
   return points.map((_, k) => {
     const days = [];
@@ -240,17 +289,50 @@ async function regionName(lat, lon, iso2) {
     const r = await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=he,en&lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`,
       { signal: AbortSignal.timeout(2500) });
     const a = r?.address || {}, region = a.province || a.state || a.county || a.region;
-    return region ? `${region}, ${nameHe(iso2, iso2)}` : null;
+    // only a Hebrew name; otherwise the caller falls back to the nearest city with a Hebrew name
+    return region && /[֐-׿]/.test(region) ? `${region}, ${nameHe(iso2, iso2)}` : null;
   } catch { return null; }
 }
-function nearestCity(lat, lon, maxKm = 60) {
+function nearestCity(lat, lon, maxKm = 60, iso2 = null) {
   let best = null, bestKm = maxKm;
-  for (const [he, , , clat, clon] of state.cities) {
-    if (Math.abs(clat - lat) > 1 || Math.abs(clon - lon) > 1.5) continue;
+  const dLat = maxKm / 111 + 0.1, dLon = maxKm / (111 * Math.max(0.1, Math.cos(lat * Math.PI / 180))) + 0.1;
+  for (const [he, , cc, clat, clon] of state.cities) {
+    if (Math.abs(clat - lat) > dLat || Math.abs(clon - lon) > dLon || (iso2 && cc !== iso2)) continue;
     const km = kmBetween({ lat, lon }, { lat: clat, lon: clon });
     if (km < bestKm) { bestKm = km; best = he; }
   }
   return best;
+}
+
+// time zone of a point: the nearest IANA zone of that country (zone.tab gives each zone's main city), so it needs
+// no request and does not depend on the weather service
+function tzFor(iso2, lat, lon) {
+  const all = state.zones || [], own = all.filter(z => z[0] === iso2);
+  let best = null, bestKm = Infinity;
+  for (const z of own.length ? own : all) {
+    const km = kmBetween({ lat, lon }, { lat: z[1], lon: z[2] });
+    if (km < bestKm) { bestKm = km; best = z[3]; }
+  }
+  return best;
+}
+// sunrise and sunset (the sunrise equation, ±1–2 minutes) as UTC timestamps; null = polar day or night
+function sunTimes(date, lat, lon) {
+  const rad = Math.PI / 180, [y, m, d] = date.split('-').map(Number);
+  // days since J2000 at the local solar noon
+  const j = Date.UTC(y, m - 1, d, 12) / 864e5 + 2440587.5 - 2451545 - lon / 360;
+  const sun = t => {   // solar transit near day t and the sun's declination at t
+    const M = (357.5291 + 0.98560028 * t) % 360;
+    const C = 1.9148 * Math.sin(M * rad) + 0.02 * Math.sin(2 * M * rad) + 0.0003 * Math.sin(3 * M * rad);
+    const L = (M + C + 282.9372) % 360;
+    return { transit: t + 0.0053 * Math.sin(M * rad) - 0.0069 * Math.sin(2 * L * rad), dec: Math.asin(Math.sin(L * rad) * Math.sin(23.4397 * rad)) };
+  };
+  const halfDay = dec => (Math.sin(-0.833 * rad) - Math.sin(lat * rad) * Math.sin(dec)) / (Math.cos(lat * rad) * Math.cos(dec));
+  const { transit, dec } = sun(j), cosW = halfDay(dec);
+  if (Math.abs(cosW) > 1) return { polar: cosW > 1 ? 'night' : 'day' };
+  const w = Math.acos(cosW) / rad / 360, ms = t => (t + 2451545 - 2440587.5) * 864e5;
+  // once more with the declination at the event itself (it moves up to 0.4° a day around the equinoxes)
+  const at = t => { const c = halfDay(sun(t).dec); return Math.abs(c) > 1 ? w : Math.acos(c) / rad / 360; };
+  return { rise: ms(transit - at(transit - w)), set: ms(transit + at(transit + w)) };
 }
 
 async function countryWeather(pt) {
@@ -258,7 +340,7 @@ async function countryWeather(pt) {
   const daily = 'temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code,sunrise,sunset,daylight_duration';
   const lat = pt.lat.toFixed(3), lon = pt.lon.toFixed(3);
   if (plan.kind !== 'estimate') {
-    const r = await getJSON(wxURL(plan.kind === 'forecast' ? 'forecast' : 'archive', lat, lon, plan.from, plan.to, daily));
+    const r = await getJSON(wxURL(plan.kind === 'forecast' ? 'forecast' : 'archive', lat, lon, plan.from, plan.to, daily), wxKeep(plan.kind));
     return { plan, tz: r.timezone, days: r.daily.time.map((t, i) => ({
       date: t, hi: r.daily.temperature_2m_max[i], lo: r.daily.temperature_2m_min[i],
       rain: r.daily.precipitation_sum[i], code: r.daily.weather_code[i],
@@ -267,7 +349,7 @@ async function countryWeather(pt) {
   // estimate: the same dates last year (as in wxSeries)
   const years = [plan.shift];
   const runs = await Promise.all(years.map(n =>
-    getJSON(wxURL('archive', lat, lon, shiftYears(plan.from, n), shiftYears(plan.to, n), daily))));
+    getJSON(wxURL('archive', lat, lon, shiftYears(plan.from, n), shiftYears(plan.to, n), daily), wxKeep('archive'))));
   const len = daysBetween(plan.from, plan.to) + 1;
   const days = [];
   for (let i = 0; i < len; i++) {
@@ -280,18 +362,26 @@ async function countryWeather(pt) {
   return { plan, tz: runs[0]?.timezone, days };
 }
 
+// rainy days of a city; for multi-year normals (they carry a typical sky code) every day has the average rain,
+// so a count would mislead: the typical sky's icon instead
+function rainCell(d, wet) {
+  if (!d.some(x => x.rain != null)) return '';
+  if (d[0]?.code !== undefined) { const [ic, t] = WX(d[0].code); return `<span title="${t} (ממוצע)">${ic}</span>`; }
+  return wet ? `🌧️ ${wet}` : '☀️';
+}
 async function loadCitiesWx(iso2, token) {
   const cities = spreadCities(iso2);
   if (cities.length < 2) return;
   try {
-    const series = await wxSeries(cities, undefined, pd());
+    const series = await wxSeries(cities, undefined, pd())
+      .catch(async e => { console.error(e); return (await normalWeather(cities, pd())).map(d => d || []); });
     if (token !== panelToken || !$('#citiesWx')) return;
     $('#citiesWx').innerHTML = `<h4 class="sub-h">ערים מרכזיות <small>· לחצו לפירוט יומי</small></h4>
       <table class="wx cities">${cities.map((c, k) => {
         const d = series[k], hi = avg(d.map(x => x.hi)), lo = avg(d.map(x => x.lo)), wet = d.filter(x => x.rain >= 1).length;
         return `<tr data-city="${k}"><td>${esc(c.he)}</td>
           <td><span class="tchip" style="background:${tempColor(hi)}">${Math.round(hi)}°</span></td>
-          <td class="lo">${Math.round(lo)}°</td><td>${wet ? `🌧️ ${wet}` : '☀️'}</td></tr>`;
+          <td>${lo == null ? '–' : `<span class="tchip tchip-lo" style="${tempChipLo(lo)}">${Math.round(lo)}°</span>`}</td><td>${rainCell(d, wet)}</td></tr>`;
       }).join('')}</table>`;
     $('#citiesWx').onclick = e => {
       const k = e.target.closest('[data-city]')?.dataset.city; if (k == null) return;
@@ -320,13 +410,13 @@ async function holidays(iso2) {
   // Nager.Date has no Israel: use Hebcal's Israeli holiday calendar (major + modern holidays)
   const { from, to } = pd();
   if (iso2 === 'IL') {
-    const r = await getJSON(`https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&mod=on&i=on&lg=he&start=${from}&end=${to}`).catch(() => null);
+    const r = await getJSON(`https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&mod=on&i=on&lg=he&start=${from}&end=${to}`);   // a failure shows as an error, not as "no data"
     if (!r) return null;
     return mergeHolidays((r.items || []).filter(i => i.category === 'holiday').map(i => ({ date: i.date.slice(0, 10), localName: i.hebrew || i.title, name: i.hebrew || i.title })));
   }
   const y0 = parse(from).getFullYear(), y1 = parse(to).getFullYear();
   const lists = await Promise.all([...new Set([y0, y1])].map(y =>
-    getJSON(`https://date.nager.at/api/v3/PublicHolidays/${y}/${iso2}`).catch(() => null)));
+    getJSON(`https://date.nager.at/api/v3/PublicHolidays/${y}/${iso2}`)));   // 404 = country not covered (null)
   if (lists.every(l => !l)) return null;
   return lists.flat().filter(h => h && h.date >= from && h.date <= to);
 }
@@ -413,14 +503,26 @@ function tempRGB(t) {
   return TEMP_STOPS[TEMP_STOPS.length - 1][1];
 }
 const tempColor = t => `rgb(${tempRGB(t).join(',')})`;
+// the minimum's chip: a pale version of the same colour, with text in a dark shade of it
+const tempChipLo = t => { const c = tempRGB(t);
+  return `background:rgb(${c.map(v => Math.round(v * 0.45 + 140)).join(',')});color:rgb(${c.map(v => Math.round(v * 0.45)).join(',')})`; };
 const wrapLon = lon => ((lon + 540) % 360) - 180;
 
 let climate = null;   // { north, west, step, rows, cols, v: Float32Array(rows * cols * 12), NaN where there is no data }
 const climateReady = fetch('data/climate.json').then(r => r.json()).then(j => {
   const { north, west, step, rows, cols, scale } = j._meta, v = new Float32Array(rows * cols * 12).fill(NaN);
   j.i.forEach((node, k) => { for (let m = 0; m < 12; m++) v[node * 12 + m] = j.v[k * 12 + m] / scale; });
-  climate = { north, west, step, rows, cols, v };
+  climate = { north, west, step, rows, cols, v, nodes: j.i };
 }).catch(e => console.error('climate data', e));
+// normal lows and rain (data/climate-extra.json, same nodes): only for the panel when the weather service fails,
+// so loaded on first use
+let climateExtra = null;
+const loadClimateExtra = () => climateExtra ||= climateReady.then(() => fetch('data/climate-extra.json')).then(r => r.json()).then(j => {
+  const n = climate.rows * climate.cols * 12, lo = new Float32Array(n).fill(NaN), rain = new Float32Array(n).fill(NaN);
+  climate.nodes.forEach((node, k) => { for (let m = 0; m < 12; m++) {
+    lo[node * 12 + m] = j.lo[k * 12 + m] / j._meta.loScale; rain[node * 12 + m] = j.rain[k * 12 + m] / j._meta.rainScale; } });
+  return { lo, rain };
+}).catch(e => { climateExtra = null; throw e; });   // a failed load is tried again next time
 
 // for each day of a range: the two months it lies between and the weight of the second (mid-month anchors)
 function dayWeights(from, to) {
@@ -433,9 +535,9 @@ function dayWeights(from, to) {
   return out;
 }
 // the 12 monthly normals at a point, bilinear between the four surrounding grid nodes (missing nodes skipped)
-function monthlyAt(lat, lon) {
+function monthlyAt(lat, lon, v = climate?.v) {
   if (!climate) return null;
-  const { north, west, step, rows, cols, v } = climate;
+  const { north, west, step, rows, cols } = climate;
   const gy = (north - lat) / step, gx = (wrapLon(lon) - west) / step;
   if (gy < 0 || gy > rows - 1) return null;
   const y0 = Math.floor(gy), x0 = Math.floor(gx), fy = gy - y0, fx = gx - x0;
@@ -450,9 +552,25 @@ function monthlyAt(lat, lon) {
   return wsum ? out.map(x => x / wsum) : null;
 }
 // normal daily highs at a point for every day of a range
-function normalDays(lat, lon, from, to) {
-  const mo = monthlyAt(lat, lon);
+function normalDays(lat, lon, from, to, v) {
+  const mo = monthlyAt(lat, lon, v);
   return mo && dayWeights(from, to).map(([a, b, f]) => mo[a] * (1 - f) + mo[b] * f);
+}
+// the panel's fallback when the weather service is unavailable: a normal day (high, low, rain) for every date,
+// in the same shape as the service's days; null where there is no climate data (open sea)
+async function normalWeather(points, { from, to }) {
+  await climateReady;
+  // the highs are the map's own file; lows and rain come from a second file, and without it the highs alone
+  const ex = await loadClimateExtra().catch(e => { console.error(e); return null; });
+  const dates = []; for (let d = from; d <= to; d = addDays(d, 1)) dates.push(d);
+  return points.map(p => {
+    const hi = normalDays(p.lat, p.lon, from, to);
+    if (!hi) return null;
+    const lo = ex && normalDays(p.lat, p.lon, from, to, ex.lo), rain = ex && normalDays(p.lat, p.lon, from, to, ex.rain);
+    // a typical day's sky from its average rain (mm a day)
+    return dates.map((date, i) => ({ date, hi: hi[i], lo: lo?.[i] ?? null, rain: rain?.[i] ?? null,
+      code: rain == null ? null : rain[i] >= 4 ? (lo[i] < 0 ? 71 : 61) : rain[i] >= 1.5 ? (lo[i] < 0 ? 71 : 51) : rain[i] >= 0.5 ? 2 : 0 }));
+  });
 }
 
 map.createPane('heat');
@@ -506,7 +624,7 @@ function drawHeat() {
   if (state.layer !== 'temp' || !heat.grid) { ctx.clearRect(0, 0, heatCanvas.width, heatCanvas.height); return; }
   const size = map.getSize(), q = 4, W = Math.ceil(size.x / q), H = Math.ceil(size.y / q);
   const origin = map.containerPointToLayerPoint([0, 0]);
-  heat.nw = map.containerPointToLatLng([0, 0]);   // for the zoom animation
+  heat.nw = map.containerPointToLatLng([0, 0]); heat.zoom = map.getZoom();   // for the zoom animation
   heatCanvas.width = size.x; heatCanvas.height = size.y;
   heatCanvas.style.width = size.x + 'px'; heatCanvas.style.height = size.y + 'px';
   L.DomUtil.setPosition(heatCanvas, origin);
@@ -553,7 +671,13 @@ let landFeatures = [];
 // while zooming, scale the existing picture with the map (as Leaflet does for images) instead of blanking it
 map.on('zoomanim', e => {
   if (!heat.nw || state.layer !== 'temp') return;
-  L.DomUtil.setTransform(heatCanvas, map._latLngToNewLayerPoint(heat.nw, e.zoom, e.center), map.getZoomScale(e.zoom));
+  L.DomUtil.setTransform(heatCanvas, map._latLngToNewLayerPoint(heat.nw, e.zoom, e.center), map.getZoomScale(e.zoom, heat.zoom));
+});
+// a pinch on a phone zooms step by step with 'zoom' events (no zoomanim): follow each step, as the country
+// shapes do, so the picture does not slide away from them
+map.on('zoom', () => {
+  if (!heat.nw || state.layer !== 'temp') return;
+  L.DomUtil.setTransform(heatCanvas, map.latLngToLayerPoint(heat.nw), map.getZoomScale(map.getZoom(), heat.zoom));
 });
 map.on('moveend resize', () => { if (state.layer === 'temp') drawHeat(); });
 
@@ -577,6 +701,10 @@ function styleFor(f) {
   const key = keyOf(f.properties), w = nscFor(key), fill = fillFor(key);
   if (state.finder) {
     const hit = finderMatches.has(key);
+    // on the temperature layer the heat map shows through the matches and the rest is greyed out
+    if (state.layer === 'temp') return hit
+      ? { fillColor: '#2f6fde', fillOpacity: 0, color: sel ? '#1d2433' : '#2f6fde', weight: sel ? 2.5 : 1.6, dashArray: null }
+      : { fillColor: '#c9ced8', fillOpacity: 0.85, color: '#fff', weight: 0.7, dashArray: null };
     return { fillColor: hit ? '#2f6fde' : '#c9ced8', fillOpacity: hit ? 0.6 : 0.45, color: sel ? '#1d2433' : '#fff', weight: sel ? 2.5 : 0.7, dashArray: null };
   }
   const mixed = state.layer === 'risk' && state.riskMode !== 'adl' && w?.mixed;
@@ -726,6 +854,7 @@ function mainBounds(iso2) {
 }
 
 function fitCountry(iso2) {
+  if (!map.getSize().x) return;   // a page opened in a background tab has no size yet; flying would throw
   const wide = innerWidth > 760;
   // fractional zoom just for this fit, so the country fills the screen instead of
   // rounding down to the next whole level (flyToBounds reads zoomSnap synchronously)
@@ -846,13 +975,21 @@ async function fillMoney(iso2, token) {
       <div class="meta">שער יומי · <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a></div>`;
   } catch { if (el()) $('#prMoney').querySelector('.spinner').textContent = 'לא הצלחנו לטעון שער מטבע'; }
 }
-function fillDaylight(days, label, token) {
+// computed here, not fetched: first and last day of the range
+function fillDaylight(pt, tz, token) {
   if (token !== panelToken || !$('#prDaylight')) return;
-  const withSun = days.filter(d => d.sunrise && d.sunset);
-  const t = s => s.slice(11, 16), hrs = sec => `${Math.floor(sec / 3600)}:${String(Math.round(sec % 3600 / 60)).padStart(2, '0')}`;
-  const line = d => `<div class="pr-line">${dayLabel(d.date)}: <b dir="ltr">${t(d.sunrise)}–${t(d.sunset)}</b>${d.daylight ? ` · ${hrs(d.daylight)} שעות אור` : ''}</div>`;
-  $('#prDaylight').innerHTML = `<h4>🌅 שעות אור${label ? ` · ${esc(label)}` : ''}</h4>
-    ${withSun.length ? line(withSun[0]) + (withSun.length > 1 ? line(withSun[withSun.length - 1]) : '') : '<div class="pr-line">אין נתונים</div>'}
+  if (!pt || !tz) { $('#prDaylight').querySelector('.spinner').textContent = 'אין נתונים'; return; }
+  const clock = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: tz });
+  const hrs = ms => { const min = Math.round(ms / 6e4); return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`; };
+  const line = date => {
+    const s = sunTimes(date, pt.lat, pt.lon);
+    const body = s.polar ? (s.polar === 'day' ? 'השמש לא שוקעת' : 'השמש לא זורחת')
+      : `<b dir="ltr">${clock.format(s.rise)}–${clock.format(s.set)}</b> · ${hrs(s.set - s.rise)} שעות אור`;
+    return `<div class="pr-line">${dayLabel(date)}: ${body}</div>`;
+  };
+  const { from, to } = pd();
+  $('#prDaylight').innerHTML = `<h4>🌅 שעות אור${pt.label ? ` · ${esc(pt.label)}` : ''}</h4>
+    ${line(from)}${to !== from ? line(to) : ''}
     <div class="meta">זריחה ושקיעה בשעון המקומי</div>`;
 }
 async function fillShabbat(pt, tz, token) {
@@ -938,13 +1075,15 @@ function factsItem(iso2) {
   if (!i) return `<div class="pr-item"><h4>ℹ️ פרטים כלליים</h4><div class="empty">אין נתונים</div></div>`;
   const langNames = new Intl.DisplayNames(['he'], { type: 'language' });
   const langs = Object.entries(i.languages || {}).map(([code, en]) => { try { const n = langNames.of(code); return n && n !== code ? n : en; } catch { return en; } });
-  const cur = Object.entries(i.currencies || {}).map(([code, c]) => `${c.name} (${c.symbol || code})`);
+  const curNames = new Intl.DisplayNames(['he'], { type: 'currency' });
+  const cur = Object.entries(i.currencies || {}).map(([code, c]) => { let n; try { n = curNames.of(code); } catch {} return `${n && n !== code ? n : c.name} (${c.symbol || code})`; });
+  const caps = capitalsHe(iso2);
   return `<div class="pr-item"><h4>ℹ️ פרטים כלליים</h4><dl class="facts">
-    ${i.capital?.length ? `<dt>בירה</dt><dd>${esc(i.capital.join(', '))}</dd>` : ''}
+    ${caps.length ? `<dt>בירה</dt><dd>${esc(caps.join(', '))}</dd>` : ''}
     ${i.pop ? `<dt>אוכלוסייה</dt><dd>${fmtNum.format(i.pop)} <small style="color:#6b7385">(${i.popYear})</small></dd>` : ''}
     ${langs.length ? `<dt>שפות</dt><dd>${esc(langs.join(', '))}</dd>` : ''}
     ${cur.length ? `<dt>מטבע</dt><dd>${esc(cur.join(', '))}</dd>` : ''}
-    ${i.region ? `<dt>אזור</dt><dd>${esc(i.region)}</dd>` : ''}
+    ${i.region ? `<dt>אזור</dt><dd>${esc(REGION_HE[i.region] || i.region)}</dd>` : ''}
     ${flightLine(iso2)}
     <dt>שעה מקומית</dt><dd id="localTime">–</dd>
   </dl></div>`;
@@ -1064,6 +1203,8 @@ $('#panelBody').addEventListener('change', e => {
   $('#tripFlights').href = l.flights; $('#tripHotels').href = l.hotels;
 });
 
+// a long country name gets a smaller font, so it fits beside the dates in two lines at most
+const nameCls = n => n.length > 14 ? ' class="long"' : n.length > 7 ? ' class="mid"' : '';
 async function renderPanel() {
   const iso2 = state.selected; if (!iso2) return;
   const token = ++panelToken;
@@ -1083,9 +1224,10 @@ async function renderPanel() {
   $('#panelBody').innerHTML = `
     <div class="p-head">
       <img src="https://flagcdn.com/w160/${iso2.toLowerCase()}.png" alt="" onerror="this.remove()">
-      <div><h2>${esc(nameHe(iso2, p.he || p.en))}</h2><div class="en">${esc(p.en)}</div></div>
+      <div><h2${nameCls(nameHe(iso2, p.he || p.en))}>${esc(nameHe(iso2, p.he || p.en))}</h2><div class="en">${esc(p.en)}</div></div>
       <div class="p-dates${state.pdates ? ' custom' : ''}">
         <input id="pDates" readonly aria-label="תאריכים למדינה זו" title="שינוי התאריכים למדינה זו בלבד">
+        <svg class="pencil" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M11.7 1.3a1.5 1.5 0 0 1 2.1 0l.9.9a1.5 1.5 0 0 1 0 2.1L5.4 13.6 1.5 14.5l.9-3.9 9.3-9.3zM3.5 11.2l-.4 1.7 1.7-.4 7.6-7.6-1.3-1.3-7.6 7.6z"/></svg>
         ${state.pdates ? '<button class="p-dates-reset" data-act="pdreset" title="חזרה לתאריכי המפה">↺</button>' : ''}
       </div>
     </div>
@@ -1105,33 +1247,53 @@ async function renderPanel() {
   setupPanelDates();
   // weather
   fillMoney(iso2, token);
-  if (!pt) { fillShabbat(null, null, token); fillDaylight([], '', token); }
-  if (pt) countryWeather(pt).then(({ plan, tz, days }) => {
+  // the time zone comes from a local table, so Shabbat times, daylight and local time do not wait for the weather
+  const tz = pt && tzFor(iso2, pt.lat, pt.lon);
+  fillShabbat(pt, tz, token);
+  fillDaylight(pt, tz, token);
+  if (tz && $('#localTime')) try { $('#localTime').textContent = new Intl.DateTimeFormat('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: tz }).format(new Date()); } catch {}
+  if (!pt) $('#wxBody').innerHTML = '<div class="empty">אין נתונים</div>';
+  // the weather service (forecast, or the same dates last year); if it is unavailable, the multi-year normal of
+  // every day from local data, so this section always shows something
+  if (pt) countryWeather(pt).catch(async e => {
+    console.error(e);
+    const [days] = await normalWeather([pt], pd());
+    if (!days) throw e;
+    return { plan: { kind: 'normal', limit: /429|quota/.test(e.message) }, days };
+  }).then(({ plan, days }) => {
     if (token !== panelToken) return;
-    fillShabbat(pt, tz, token);
-    fillDaylight(days, pt.label, token);
-    if (tz && $('#localTime')) try { $('#localTime').textContent = new Intl.DateTimeFormat('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: tz }).format(new Date()); } catch {}
-    const hi = avg(days.map(d => d.hi)), lo = avg(days.map(d => d.lo));
+    const isNormal = plan.kind === 'normal';
+    const hi = avg(days.map(d => d.hi)), lo = avg(days.map(d => d.lo)), rainAvg = avg(days.map(d => d.rain));
     const rainy = days.filter(d => d.rain >= 1).length;
-    const note = plan.kind === 'estimate' ? 'הערכה: אותם תאריכים בשנה שעברה (מעבר לטווח התחזית של 16 יום)'
-      : plan.kind === 'actual' ? 'נתונים היסטוריים בפועל' : 'תחזית';
+    const note = isNormal ? 'ממוצע רב־שנתי לכל יום · NASA POWER 2001–2020'
+      : plan.kind === 'estimate' ? 'הערכה: אותם תאריכים בשנה שעברה (מעבר לטווח התחזית של 16 יום) · Open-Meteo'
+      : plan.kind === 'actual' ? 'נתונים היסטוריים בפועל · Open-Meteo' : 'תחזית · Open-Meteo';
     // the multi-year normal for the same dates: what the heat map and the finder go by
-    const normal = avg(normalDays(pt.lat, pt.lon, pd().from, pd().to) || []);
-    $('#wxBody').innerHTML = `<div class="wxsum"><span>מקס׳ <b class="hi">${Math.round(hi)}°</b></span><span>מינ׳ <b class="lo">${Math.round(lo)}°</b></span><span>ימי גשם <b>${rainy}</b>/${days.length}</span></div>
+    const normal = isNormal ? null : avg(normalDays(pt.lat, pt.lon, pd().from, pd().to) || []);
+    // the weather service did not answer: say so, and that these are the map's own multi-year normals
+    $('#wxBody').innerHTML = `${isNormal ? `<div class="wx-limit">⚠️ התחזית לא נטענה כרגע${plan.limit ? ' (הגענו למגבלת הבקשות של שירות מזג האוויר)' : ''}. מוצגים הממוצעים הרב־שנתיים לתאריכים האלה, מהנתונים שעליהם בנויה המפה · <button class="linkbtn" data-act="wxretry">לנסות שוב</button></div>` : ''}
+      <div class="wxsum"><span>מקס׳ <b class="hi">${Math.round(hi)}°</b></span>${lo != null ? `<span>מינ׳ <b class="lo">${Math.round(lo)}°</b></span>` : ''}${isNormal
+        ? (rainAvg != null ? `<span>משקעים <b>${rainAvg.toFixed(1)}</b> מ״מ ליום</span>` : '') : `<span>ימי גשם <b>${rainy}</b>/${days.length}</span>`}</div>
       ${normal != null ? `<div class="wx-normal">ממוצע רב־שנתי לתאריכים האלה: מקס׳ <b>${Math.round(normal)}°</b> <small>(לפיו המפה ומאתר היעדים)</small></div>` : ''}
       <div id="citiesWx"></div>
       <table class="wx"><tr><th>יום</th><th></th><th>מקס׳</th><th>מינ׳</th><th>משקעים</th></tr>
       ${days.map((d, k) => { const [ic, t] = WX(d.code); return `<tr${k >= 6 ? ' class="more"' : ''}><td>${dayLabel(d.date)}</td><td title="${t}">${ic}</td>
-        <td class="hi">${d.hi == null ? '–' : Math.round(d.hi) + '°'}</td><td class="lo">${d.lo == null ? '–' : Math.round(d.lo) + '°'}</td>
+        <td>${d.hi == null ? '–' : `<span class="tchip" style="background:${tempColor(d.hi)}">${Math.round(d.hi)}°</span>`}</td>
+        <td>${d.lo == null ? '–' : `<span class="tchip tchip-lo" style="${tempChipLo(d.lo)}">${Math.round(d.lo)}°</span>`}</td>
         <td>${d.rain == null ? '–' : d.rain.toFixed(1) + ' מ״מ'}</td></tr>`; }).join('')}</table>
       ${days.length > 6 ? `<button class="linkbtn wx-more" data-act="wxmore">עוד ${days.length - 6} ימים ▾</button>` : ''}
-      <div class="meta">${note} · Open-Meteo</div>`;
+      <div class="meta">${note}</div>`;
     loadCitiesWx(iso2, token);
-  }).catch(e => { console.error(e); if (token === panelToken && $('#wxBody .spinner')) $('#wxBody .spinner').textContent = 'לא הצלחנו לטעון מזג אוויר'; });
+  }).catch(e => {
+    console.error(e);
+    if (token !== panelToken || !$('#wxBody .spinner')) return;
+    $('#wxBody').innerHTML = `<div class="empty">לא הצלחנו לטעון מזג אוויר · <button class="linkbtn" data-act="wxretry">לנסות שוב</button></div>`;
+  });
 
   // holidays
-  holidays(iso2).then(list => {
+  holidays(iso2).catch(e => { console.error(e); return 'error'; }).then(list => {
     if (token !== panelToken) return;
+    if (list === 'error') { $('#holBody').innerHTML = '<div class="empty">לא הצלחנו לטעון חגים כרגע</div>'; return; }
     const body = list == null ? '<div class="empty">אין נתוני חגים למדינה זו במקור</div>'
       : list.length ? `<ul class="list">${list.map(h => {
         const when = h.end && h.end !== h.date ? `${dmy(h.date)} – ${dmy(h.end)}` : dmy(h.date);
@@ -1151,9 +1313,18 @@ function setupPanelDates() {
     mode: 'range', dateFormat: 'd/m/y', disableMobile: true, static: true, monthSelectorType: 'static',
     locale: { ...flatpickr.l10ns.he, rangeSeparator: ' – ' }, defaultDate: [parse(from), parse(to)],
     onReady: (_, __, inst) => setupMonthPicker(inst),
+    onOpen: (_, __, inst) => {
+      // keep the calendar inside the panel (on a phone it would run past the screen's edge)
+      const cal = inst.calendarContainer, box = $('#panel').getBoundingClientRect();
+      cal.style.left = '0px';
+      const r = cal.getBoundingClientRect();
+      const shift = Math.max(box.left + 8 - r.left, Math.min(0, box.right - 8 - r.right));
+      if (shift) cal.style.left = `${shift}px`;
+    },
     onClose: (sel, _, inst) => {
-      if (sel.length !== 2) return inst.setDate([parse(from), parse(to)], false);
-      let f = iso(sel[0]), t = iso(sel[1]);
+      if (!sel.length) return inst.setDate([parse(from), parse(to)], false);
+      // one date picked: the trip moves to start on it and keeps its length
+      let f = iso(sel[0]), t = sel[1] ? iso(sel[1]) : addDays(f, daysBetween(from, to));
       if (daysBetween(f, t) > MAX_DAYS - 1) { t = addDays(f, MAX_DAYS - 1); toast(`טווח מקסימלי: ${MAX_DAYS} ימים`); }
       if (f === from && t === to) return;
       state.pdates = f === state.from && t === state.to ? null : { from: f, to: t };
@@ -1171,6 +1342,7 @@ $('#panelBody').addEventListener('click', e => {
   }
   if (act === 'jewish') showJewishFor(state.selected);
   if (act === 'pdreset') { state.pdates = null; renderPanel(); }
+  if (act === 'wxretry') renderPanel();
   if (act === 'wxmore') { e.target.closest('[data-fold]').querySelector('table.wx:not(.cities)').classList.add('all'); e.target.remove(); }
   if (act === 'share') shareCountry(state.selected);
   if (act === 'pdf') exportPdf(state.selected);
@@ -1528,11 +1700,10 @@ function openFinder(open) {
   document.body.classList.toggle('finder-open', open);
   $('#finderBtn').classList.toggle('on', open);
   if (open) {
-    if (state.layer === 'temp') setLayer('risk');
     state.finder = readFinder();
     runFinder();
   } else {
-    state.finder = null; finderMatches = new Set(); restyle();
+    state.finder = null; state.finderAll = false; finderMatches = new Set(); restyle();   // reopened: top 15 again
     if (state.layer === 'events') drawEventMarkers(); else eventLayer.remove();
   }
 }
@@ -1593,9 +1764,10 @@ function readHash() {
   state.info = info;
   state.anti = anti.countries; state.antiMeta = anti._meta || {};
   state.events = events.events;
-  fetch('data/cities.json').then(r => r.json()).then(c => { state.cities = c; drawLabels(); refreshTrip(); }).catch(() => {});
+  const citiesReady = fetch('data/cities.json').then(r => r.json()).then(c => { state.cities = c; drawLabels(); refreshTrip(); }).catch(() => {});
   fetch('data/destinations.json').then(r => r.json()).then(d => { state.dests = d.places; refreshTrip(); }).catch(() => {});
   fetch('data/airports.json').then(r => r.json()).then(a => { state.airports = a.airports; refreshTrip(); }).catch(() => {});
+  state.zones = (await fetch('data/timezones.json').then(r => r.json()).catch(() => null))?.zones || [];
   for (const f of geo.features) if (f.properties.iso2 && !state.features[f.properties.iso2]) state.features[f.properties.iso2] = f;
   // areas without an ISO code (Somaliland, Gaza…): no country panel, but the finder checks them like countries
   for (const f of geo.features) if (!f.properties.iso2 && f.properties.a3) state.areas[f.properties.a3] = f;
@@ -1621,7 +1793,8 @@ function readHash() {
           if (!iso2) return;
           const { lat, lng } = e.latlng, city = nearestCity(lat, lng);
           // label the clicked point: nearest big city, else the region (reverse geocoding), else the country
-          const label = city ? `ליד ${city}` : (await regionName(lat, lng, iso2)) || nameHe(iso2, iso2);
+          let label = city ? `ליד ${city}` : await regionName(lat, lng, iso2);
+          if (!label) { const far = nearestCity(lat, lng, 300, iso2); label = far ? `ליד ${far}` : nameHe(iso2, iso2); }
           selectCountry(iso2, { point: { lat, lon: lng, clicked: true, label } });
         },
       });
@@ -1634,5 +1807,5 @@ function readHash() {
   if (h.layer === 'nsc' || h.layer === 'anti') { h.mode = h.layer === 'anti' ? 'adl' : 'nsc'; h.layer = 'risk'; }
   if (['combined', 'adl', 'nsc'].includes(h.mode)) state.riskMode = h.mode;
   await setLayer(['risk', 'temp', 'events'].includes(h.layer) ? h.layer : 'risk');
-  if (h.c && state.features[h.c]) selectCountry(h.c, { zoom: true });
+  if (h.c && state.features[h.c]) { await citiesReady; selectCountry(h.c, { zoom: true }); }   // capital names in Hebrew
 })();
