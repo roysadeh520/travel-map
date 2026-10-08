@@ -422,6 +422,11 @@ ul.list.compact li { padding: 3px 0; font-size: 13px; }
 .f-head { display: flex; align-items: center; justify-content: space-between; }
 .f-head h3 { margin: 0; font-size: 16px; }
 .f-head button { border: 0; background: var(--bg); width: 28px; height: 28px; border-radius: 50%; color: var(--muted); }
+.f-head h3 { flex: 1; }
+.f-head { gap: 6px; }
+.f-head .f-share { display: flex; align-items: center; justify-content: center; padding: 0; color: var(--text); }
+.share-ic { width: 15px; height: 15px; vertical-align: -3px; }
+.f-share .share-ic { width: 16px; height: 16px; }
 .f-sub { color: var(--muted); font-size: 12px; margin: 2px 0 8px; }
 #finder label { display: flex; align-items: center; gap: 6px; margin: 7px 0; flex-wrap: wrap; }
 #finder input[type=number] { width: 52px; font: inherit; padding: 2px 4px; border: 1px solid var(--line); border-radius: 6px; }
@@ -495,7 +500,8 @@ body.finder-open #legend { display: none; }
   .f-head { position: sticky; top: -14px; background: var(--surface); padding: 6px 0; z-index: 2; gap: 8px; }
   .f-head h3 { flex: 1; }
   .f-head .f-map { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: var(--accent-soft); font-size: 18px; }
-  .f-head #fClose { width: 36px; height: 36px; }
+  .f-head #fClose, .f-head .f-share { width: 36px; height: 36px; }
+  .f-head .f-share .share-ic { width: 19px; height: 19px; }
 }
 /* the three presets on one row */
 .f-presets { display: flex; gap: 4px; margin: 2px 0 8px; }

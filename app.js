@@ -1029,6 +1029,12 @@ async function fillShabbat(pt, tz, token) {
 }
 
 // ---------- share / PDF ----------
+// the system's own share symbol: Apple's box with an arrow on iPhone / iPad / Mac, the three linked dots elsewhere
+const SHARE_ICON = `<svg class="share-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${
+  /iPhone|iPad|Macintosh/.test(navigator.userAgent)
+    ? '<path d="M12 3v12M8 7l4-4 4 4"/><path d="M7 10H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1"/>'
+    : '<circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 13.3l7.4 4.4M15.7 6.3l-7.4 4.4"/>'}</svg>`;
+$('#fShare').innerHTML = SHARE_ICON;
 async function shareCountry(iso2) {
   const name = nameHe(iso2, iso2), url = location.href;
   const text = `${name} · ${dmy(pd().from)}–${dmy(pd().to)} · מפת מטיילים`;
@@ -1233,7 +1239,7 @@ async function renderPanel() {
     </div>
     <div class="p-actions">
       <button data-act="zoom">🔍 התקרבו למדינה</button>
-      <button data-act="share">📤 שיתוף</button>
+      <button data-act="share">${SHARE_ICON} שיתוף</button>
       <button data-act="pdf">📄 הורדה כ־PDF</button>
     </div>
     ${tripRow(iso2)}
@@ -1681,7 +1687,9 @@ async function runFinder() {
   hits.sort((a, b) => (b.t?.share ?? 0) - (a.t?.share ?? 0) || (a.r?.bucket ?? 5) - (b.r?.bucket ?? 5)
     || (state.info[b.iso2]?.pop || 0) - (state.info[a.iso2]?.pop || 0));
   finderMatches = new Set(hits.map(h => h.iso2));
+  state.finderHits = hits;
   restyle();
+  saveHash();   // the link carries the search, so it can be shared
   // with the events filter on, show the matching countries' event markers on the map
   if (f.events) { drawEventMarkers(finderMatches); eventLayer.addTo(map); }
   else if (state.layer !== 'events') eventLayer.remove();
@@ -1703,7 +1711,7 @@ function openFinder(open) {
     state.finder = readFinder();
     runFinder();
   } else {
-    state.finder = null; state.finderAll = false; finderMatches = new Set(); restyle();   // reopened: top 15 again
+    state.finder = null; state.finderAll = false; finderMatches = new Set(); restyle(); saveHash();   // reopened: top 15 again
     if (state.layer === 'events') drawEventMarkers(); else eventLayer.remove();
   }
 }
@@ -1713,6 +1721,34 @@ $('#finderBtn').addEventListener('click', () => {
 });
 $('#fMap').addEventListener('click', () => { $('#finder').hidden = true; document.body.classList.remove('finder-open'); });
 $('#fClose').addEventListener('click', () => openFinder(false));
+$('#fShare').addEventListener('click', shareFinder);
+
+// share the search: a short Hebrew message with the top results, then the link that reopens the same search
+const FINDER_SHARE_TOP = 5;
+async function shareFinder() {
+  const f = state.finder, hits = state.finderHits || [];
+  if (!f) return;
+  const name = iso2 => nameHe(iso2, (state.features[iso2] || state.areas[iso2]).properties.he || (state.features[iso2] || state.areas[iso2]).properties.en);
+  const deg = t => Math.round(t.lo) === Math.round(t.hi) ? `${Math.round(t.hi)}°` : `${Math.round(t.lo)}–${Math.round(t.hi)}°`;
+  const DAYS = { any: 'לפחות ביום אחד', most: 'ברוב הימים', all: 'בכל הימים' };
+  const filters = [
+    f.tempOn && `${f.tmin}°–${f.tmax}° ${DAYS[f.days]}`,
+    f.risk <= 100 ? `סיכון ${$('#fRisk').selectedOptions[0].textContent}` : null,
+    f.visa && 'בלי ויזה מראש', f.events && 'עם אירוע בתאריכים',
+  ].filter(Boolean);
+  // the place the temperature is for, as in the list (a city or tourist spot when it is not the capital)
+  const top = hits.slice(0, FINDER_SHARE_TOP).map(h => `${name(h.iso2)}${h.t ? `${h.t.capital ? '' : ` (${h.t.label})`} ${deg(h.t)}` : ''}`);
+  const more = hits.length > FINDER_SHARE_TOP ? ` (ועוד ${hits.length - FINDER_SHARE_TOP})` : '';
+  const text = `🎯 יעדים ל־${dmy(state.from).slice(0, 5)}–${dmy(state.to)}${filters.length ? ` · ${filters.join(' · ')}` : ''}:\n`
+    + (top.length ? `${top.join(' · ')}${more}` : 'לא נמצאו יעדים') + '\nלכל היעדים על המפה:';
+  const url = location.href;
+  if (navigator.share) {
+    try { await navigator.share({ title: 'מפת מטיילים – מאתר יעדים', text, url }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(`${text}\n${url}`); toast('ההודעה והקישור הועתקו – אפשר להדביק בוואטסאפ'); }
+  catch { prompt('העתיקו את הקישור:', url); }
+}
 $('#finder').addEventListener('change', () => { state.finderAll = false; runFinder(); });
 const PRESETS = { sun: [26, 34], mild: [16, 26], snow: [-15, 2] };
 $('#finder .f-presets').addEventListener('click', e => {
@@ -1739,11 +1775,29 @@ function saveHash() {
   const h = new URLSearchParams({ layer: state.layer, from: state.from, to: state.to });
   if (state.layer === 'risk' && state.riskMode !== 'combined') h.set('mode', state.riskMode);
   if (state.selected) h.set('c', state.selected);
+  // an open finder: its filters (ft = temperature range or "off", fd = days, fr = risk, fv / fe = visa / events)
+  const f = state.finder;
+  if (f) {
+    h.set('ft', f.tempOn ? `${f.tmin}_${f.tmax}` : 'off'); h.set('fd', f.days); h.set('fr', f.risk);
+    if (f.visa) h.set('fv', 1);
+    if (f.events) h.set('fe', 1);
+  }
   history.replaceState(null, '', '#' + h);
 }
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  return { layer: h.get('layer'), mode: h.get('mode'), from: h.get('from'), to: h.get('to'), c: h.get('c') };
+  return { layer: h.get('layer'), mode: h.get('mode'), from: h.get('from'), to: h.get('to'), c: h.get('c'),
+    finder: h.has('ft') ? { ft: h.get('ft'), fd: h.get('fd'), fr: h.get('fr'), fv: h.has('fv'), fe: h.has('fe') } : null };
+}
+// a shared search: fill the finder's fields from the link and open it
+function applyFinderHash(p) {
+  const [a, b] = (p.ft || '').split('_').map(Number);
+  $('#fTempOn').checked = p.ft !== 'off';
+  if (Number.isFinite(a) && Number.isFinite(b)) { $('#fTmin').value = a; $('#fTmax').value = b; }
+  if ([...$('#fDays').options].some(o => o.value === p.fd)) $('#fDays').value = p.fd;
+  if ([...$('#fRisk').options].some(o => o.value === p.fr)) $('#fRisk').value = p.fr;
+  $('#fVisa').checked = p.fv; $('#fEvents').checked = p.fe;
+  openFinder(true);
 }
 
 // ---------- boot ----------
@@ -1807,5 +1861,6 @@ function readHash() {
   if (h.layer === 'nsc' || h.layer === 'anti') { h.mode = h.layer === 'anti' ? 'adl' : 'nsc'; h.layer = 'risk'; }
   if (['combined', 'adl', 'nsc'].includes(h.mode)) state.riskMode = h.mode;
   await setLayer(['risk', 'temp', 'events'].includes(h.layer) ? h.layer : 'risk');
+  if (h.finder) applyFinderHash(h.finder);
   if (h.c && state.features[h.c]) { await citiesReady; selectCountry(h.c, { zoom: true }); }   // capital names in Hebrew
 })();
