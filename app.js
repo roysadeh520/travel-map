@@ -621,10 +621,35 @@ function latticeAt(lat, lon) {
 
 // Paints the grid in geographic space: a quarter-resolution image computed pixel by pixel (Mercator is
 // separable, so each column has one longitude and each row one latitude), scaled up smoothly and clipped to land.
+// a polygon ring clipped to a rectangle (Sutherland–Hodgman: one pass per edge of the rectangle)
+function clipRing(pts, [x0, y0, x1, y1]) {
+  const edges = [[p => p.x >= x0, (a, b) => cut(a, b, 'x', x0)], [p => p.x <= x1, (a, b) => cut(a, b, 'x', x1)],
+    [p => p.y >= y0, (a, b) => cut(a, b, 'y', y0)], [p => p.y <= y1, (a, b) => cut(a, b, 'y', y1)]];
+  function cut(a, b, k, v) {
+    const t = (v - a[k]) / (b[k] - a[k]);
+    return k === 'x' ? { x: v, y: a.y + t * (b.y - a.y) } : { x: a.x + t * (b.x - a.x), y: v };
+  }
+  for (const [inside, cross] of edges) {
+    if (!pts.length) break;
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const cur = pts[i], prev = pts[(i + pts.length - 1) % pts.length];
+      if (inside(cur)) { if (!inside(prev)) out.push(cross(prev, cur)); out.push(cur); }
+      else if (inside(prev)) out.push(cross(prev, cur));
+    }
+    pts = out;
+  }
+  return pts;
+}
+// the heat map fades out at street level, where its 1° grid says nothing and the streets matter
+const heatOpacity = z => (z <= 7 ? 0.8 : z <= 9 ? 0.55 : z <= 11 ? 0.35 : 0);
 function drawHeat() {
   const ctx = heatCanvas.getContext('2d');
-  if (state.layer !== 'temp' || !heat.grid) { ctx.clearRect(0, 0, heatCanvas.width, heatCanvas.height); return; }
-  const size = map.getSize(), q = 4, W = Math.ceil(size.x / q), H = Math.ceil(size.y / q);
+  const size = map.getSize();
+  if (state.layer !== 'temp' || !heat.grid || !size.x || !size.y) { ctx.clearRect(0, 0, heatCanvas.width, heatCanvas.height); return; }
+  heatCanvas.style.opacity = heatOpacity(map.getZoom());
+  if (!heatOpacity(map.getZoom())) return;
+  const q = 4, W = Math.ceil(size.x / q), H = Math.ceil(size.y / q);
   const origin = map.containerPointToLayerPoint([0, 0]);
   heat.nw = map.containerPointToLatLng([0, 0]); heat.zoom = map.getZoom();   // for the zoom animation
   heatCanvas.width = size.x; heatCanvas.height = size.y;
@@ -651,14 +676,17 @@ function drawHeat() {
   const view = map.getBounds().pad(0.1);
   ctx.globalCompositeOperation = 'destination-in';
   ctx.beginPath();
+  // each ring is clipped to (a margin around) the screen first: zoomed in, a country's outline lies hundreds of
+  // thousands of pixels away, and the canvas then fills it wrongly (part of the screen left uncovered)
+  const box = [-50, -50, size.x + 50, size.y + 50];
   for (const f of landFeatures) {
     const bb = f.bbox;
     if (bb[2] < view.getWest() || bb[0] > view.getEast() || bb[3] < view.getSouth() || bb[1] > view.getNorth()) continue;
     const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
-    for (const poly of polys) for (const ring of poly) ring.forEach(([lon, lat], i) => {
-      const p = map.latLngToLayerPoint([lat, lon]).subtract(origin);
-      i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
-    });
+    for (const poly of polys) for (const ring of poly) {
+      const pts = clipRing(ring.map(([lon, lat]) => map.latLngToLayerPoint([lat, lon]).subtract(origin)), box);
+      pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    }
   }
   ctx.fill('evenodd');
   ctx.globalCompositeOperation = 'source-over';
