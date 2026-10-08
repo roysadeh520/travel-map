@@ -1741,7 +1741,10 @@ async function shareFinder() {
   const more = hits.length > FINDER_SHARE_TOP ? ` (ועוד ${hits.length - FINDER_SHARE_TOP})` : '';
   const text = `🎯 יעדים ל־${dmy(state.from).slice(0, 5)}–${dmy(state.to)}${filters.length ? ` · ${filters.join(' · ')}` : ''}:\n`
     + (top.length ? `${top.join(' · ')}${more}` : 'לא נמצאו יעדים') + '\nלכל היעדים על המפה:';
-  const url = location.href;
+  // the search only: a country panel open while sharing is not part of it
+  const h = new URLSearchParams(location.hash.slice(1));
+  h.delete('c');
+  const url = `${location.origin}${location.pathname}#${h}`;
   if (navigator.share) {
     try { await navigator.share({ title: 'מפת מטיילים – מאתר יעדים', text, url }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
