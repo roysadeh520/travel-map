@@ -1036,7 +1036,11 @@ const SHARE_ICON = `<svg class="share-ic" viewBox="0 0 24 24" fill="none" stroke
     : '<circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 13.3l7.4 4.4M15.7 6.3l-7.4 4.4"/>'}</svg>`;
 $('#fShare').innerHTML = SHARE_ICON;
 async function shareCountry(iso2) {
-  const name = nameHe(iso2, iso2), url = location.href;
+  // the country only: an open finder's search is not part of it
+  const h = new URLSearchParams(location.hash.slice(1));
+  for (const k of ['ft', 'fd', 'fr', 'fv', 'fe']) h.delete(k);
+  h.set('from', pd().from); h.set('to', pd().to);   // the dates shown in the panel, even when changed there only
+  const name = nameHe(iso2, iso2), url = `${location.origin}${location.pathname}#${h}`;
   const text = `${name} · ${dmy(pd().from)}–${dmy(pd().to)} · מפת מטיילים`;
   if (navigator.share) {
     try { await navigator.share({ title: `מפת מטיילים – ${name}`, text, url }); return; }
