@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <!-- bump ?v= on every release so browsers don't keep a stale copy (GitHub Pages caches for 10 min) -->
-<link rel="stylesheet" href="style.css?v=2026100811">
+<link rel="stylesheet" href="style.css?v=2026100813">
 </head>
 <body>
 <header class="topbar">
@@ -49,6 +49,11 @@
     <button id="jewish" title="בתי כנסת ומסעדות כשרות באזור (בזום קרוב)">🕍</button>
   </div>
   <div id="legend"></div>
+  <div id="intro" hidden>
+    <b>💡 לחצו על מדינה כדי לראות את כל המידע עליה</b>
+    <div class="intro-list">🧭 מדד סיכון · 🌤️ מזג אוויר · 🛂 ויזה · 🕯️ זמני שבת · 📅 חגים ואירועים · 💱 מטבע · ✈️ טיסות ומלונות</div>
+    <button id="introOk">הבנתי</button>
+  </div>
   <div id="finder" hidden>
     <div class="f-head"><h3>🎯 מאתר יעדים</h3><button id="fMap" class="f-map" title="הצג את התוצאות על המפה (הסינון נשאר)" aria-label="הצג את התוצאות על המפה">🗺️</button><button id="fClose" title="סגירה">✕</button></div>
     <div class="f-sub">לפי התאריכים שנבחרו למעלה</div>
@@ -72,6 +77,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/he.min.js"></script>
-<script src="app.js?v=2026100811"></script>
+<script src="app.js?v=2026100813"></script>
 </body>
 </html>

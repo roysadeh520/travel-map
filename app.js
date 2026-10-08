@@ -88,7 +88,8 @@ const state = {
   anti: {}, antiMeta: {},
   nsc: {}, nscMeta: {},
   practical: {},        // data/practical.json: visa, emergency, plugs, voltage, driving side, missions
-  practicalOpen: true,
+  pdates: null,         // the country panel's own date range ({from, to}); null = the map's dates
+  folds: (() => { try { return JSON.parse(localStorage.getItem('tm-folds')) || {}; } catch { return {}; } })(),   // panel sections the viewer closed
   finder: null,         // destination-finder criteria while its panel is open
   ctemps: null,         // { key, temps } per-country temperature for the finder
   events: [],
@@ -98,6 +99,8 @@ const state = {
 const cache = new Map();
 
 // ---------- date helpers ----------
+// dates the country panel shows: its own range if the viewer changed it there, else the map's
+const pd = () => state.pdates || { from: state.from, to: state.to };
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const parse = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d); };
@@ -191,8 +194,8 @@ const avg = a => { const v = a.filter(x => x != null); return v.length ? v.reduc
 // daily max / min / rain for several points in one request; beyond the forecast horizon: the same dates last year
 // (the panel, the finder and the heat map all use this, so their numbers agree; a multi-year average would
 // triple the calls and break Open-Meteo's free limit of 600 locations a minute for the finder)
-async function wxSeries(points, daily = 'temperature_2m_max,temperature_2m_min,precipitation_sum') {
-  const plan = weatherPlan(state.from, state.to);
+async function wxSeries(points, daily = 'temperature_2m_max,temperature_2m_min,precipitation_sum', range = state) {
+  const plan = weatherPlan(range.from, range.to);
   const lats = points.map(p => p.lat.toFixed(2)).join(','), lons = points.map(p => p.lon.toFixed(2)).join(',');
   const asList = r => (Array.isArray(r) ? r : [r]);
   const from = plan.kind === 'estimate' ? shiftYears(plan.from, plan.shift) : plan.from;
@@ -250,7 +253,7 @@ function nearestCity(lat, lon, maxKm = 60) {
 }
 
 async function countryWeather(pt) {
-  const plan = weatherPlan(state.from, state.to);
+  const plan = weatherPlan(pd().from, pd().to);
   const daily = 'temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code,sunrise,sunset,daylight_duration';
   const lat = pt.lat.toFixed(3), lon = pt.lon.toFixed(3);
   if (plan.kind !== 'estimate') {
@@ -280,7 +283,7 @@ async function loadCitiesWx(iso2, token) {
   const cities = spreadCities(iso2);
   if (cities.length < 2) return;
   try {
-    const series = await wxSeries(cities);
+    const series = await wxSeries(cities, undefined, pd());
     if (token !== panelToken || !$('#citiesWx')) return;
     $('#citiesWx').innerHTML = `<h4 class="sub-h">ערים מרכזיות <small>· לחצו לפירוט יומי</small></h4>
       <table class="wx cities">${cities.map((c, k) => {
@@ -314,16 +317,17 @@ function mergeHolidays(list) {
 
 async function holidays(iso2) {
   // Nager.Date has no Israel: use Hebcal's Israeli holiday calendar (major + modern holidays)
+  const { from, to } = pd();
   if (iso2 === 'IL') {
-    const r = await getJSON(`https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&mod=on&i=on&lg=he&start=${state.from}&end=${state.to}`).catch(() => null);
+    const r = await getJSON(`https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&mod=on&i=on&lg=he&start=${from}&end=${to}`).catch(() => null);
     if (!r) return null;
     return mergeHolidays((r.items || []).filter(i => i.category === 'holiday').map(i => ({ date: i.date.slice(0, 10), localName: i.hebrew || i.title, name: i.hebrew || i.title })));
   }
-  const y0 = parse(state.from).getFullYear(), y1 = parse(state.to).getFullYear();
+  const y0 = parse(from).getFullYear(), y1 = parse(to).getFullYear();
   const lists = await Promise.all([...new Set([y0, y1])].map(y =>
     getJSON(`https://date.nager.at/api/v3/PublicHolidays/${y}/${iso2}`).catch(() => null)));
   if (lists.every(l => !l)) return null;
-  return lists.flat().filter(h => h && h.date >= state.from && h.date <= state.to);
+  return lists.flat().filter(h => h && h.date >= from && h.date <= to);
 }
 
 // ---------- map ----------
@@ -576,6 +580,8 @@ function styleFor(f) {
   return { fillColor: fill, fillOpacity: op, color: '#ffffff', weight: 0.7, dashArray: null };
 }
 function restyle() { countryLayer?.setStyle(styleFor); }
+// every country tooltip says there is more behind a click
+const TT_CTA = '<div class="tt-cta">👆 לחצו לכל פרטי המדינה</div>';
 function tooltipFor(p) {
   const n = nameHe(p.iso2, p.he || p.en);
   let extra = '';
@@ -589,14 +595,14 @@ function tooltipFor(p) {
     return `<b>${esc(n)}</b>
       ${r ? `<div class="tt-score" style="color:${darkText(r.color)}">מדד סיכון: <b>${r.score}</b> · ${r.label}</div>` : ''}
       <div class="tt-row">🚨 מל״ל: ${nscLine}</div>
-      <div class="tt-row">🛡️ אנטישמיות: ${adlLine}</div>`;
+      <div class="tt-row">🛡️ אנטישמיות: ${adlLine}</div>${TT_CTA}`;
   }
   else if (state.layer === 'temp') {
     const t = state.mouseLL ? tempAt(state.mouseLL) : null;
-    extra = t == null ? 'לחצו לפרטי מזג האוויר' : `🌡️ כאן: ${Math.round(t)}° <small>(ממוצע מקסימום יומי)</small>`;
+    extra = t == null ? '' : `🌡️ כאן: ${Math.round(t)}° <small>(ממוצע מקסימום יומי)</small>`;
   }
   else { const ev = eventsInRange(p.iso2); extra = ev.length ? ev.map(e => (CAT_ICON[e.cat] || '') + ' ' + e.name).join('<br>') : 'אין אירועים במאגר בתאריכים אלה'; }
-  return `<b>${esc(n)}</b><br><span style="color:#6b7385">${extra}</span>`;
+  return `<b>${esc(n)}</b>${extra ? `<br><span style="color:#6b7385">${extra}</span>` : ''}${TT_CTA}`;
 }
 
 // event markers (visible on the events layer)
@@ -682,6 +688,7 @@ function resetPageZoom() {
 async function selectCountry(iso2, { zoom = false, point = null } = {}) {
   const f = state.features[iso2];
   if (!f) return;
+  hideIntro();
   if (iso2 !== state.selected) state.panelReset = true;   // applied once the panel is visible (see renderPanel)
   state.selected = iso2;
   state.point = point || repPoint(iso2);
@@ -808,9 +815,7 @@ function powerItem(iso2) {
     <div class="meta">Wikidata</div></div>`;
 }
 function practicalSection(iso2) {
-  return `<details class="card practical" ${state.practicalOpen ? 'open' : ''}>
-    <summary><h3>🧳 מידע מעשי</h3></summary>
-    <div class="pr-grid">
+  return fold('practical', '🧳 מידע מעשי', `<div class="pr-grid">
       ${factsItem(iso2)}
       <div class="pr-item" id="prShabbat"><h4>🕯️ שבת וחגים</h4><div class="spinner">טוען…</div></div>
       ${communityItem(iso2)}
@@ -819,7 +824,7 @@ function practicalSection(iso2) {
       <div class="pr-item" id="prDaylight"><h4>🌅 שעות אור</h4><div class="spinner">טוען…</div></div>
       ${powerItem(iso2)}
     </div>
-  </details>`;
+  </div>`);
 }
 async function fillMoney(iso2, token) {
   const el = () => token === panelToken && $('#prMoney');
@@ -847,7 +852,7 @@ async function fillShabbat(pt, tz, token) {
   const el = () => token === panelToken && $('#prShabbat');
   if (!pt || !tz) { if (el()) $('#prShabbat').querySelector('.spinner').textContent = 'אין נתונים'; return; }
   try {
-    const url = `https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&min=on&mod=on&s=on&c=on&M=on&lg=he&geo=pos&latitude=${pt.lat.toFixed(3)}&longitude=${pt.lon.toFixed(3)}&tzid=${encodeURIComponent(tz)}&start=${state.from}&end=${state.to}`;
+    const url = `https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&min=on&mod=on&s=on&c=on&M=on&lg=he&geo=pos&latitude=${pt.lat.toFixed(3)}&longitude=${pt.lon.toFixed(3)}&tzid=${encodeURIComponent(tz)}&start=${pd().from}&end=${pd().to}`;
     const r = await getJSON(url);
     if (!el()) return;
     const items = r.items || [];
@@ -882,7 +887,7 @@ async function fillShabbat(pt, tz, token) {
 // ---------- share / PDF ----------
 async function shareCountry(iso2) {
   const name = nameHe(iso2, iso2), url = location.href;
-  const text = `${name} · ${dmy(state.from)}–${dmy(state.to)} · מפת מטיילים`;
+  const text = `${name} · ${dmy(pd().from)}–${dmy(pd().to)} · מפת מטיילים`;
   if (navigator.share) {
     try { await navigator.share({ title: `מפת מטיילים – ${name}`, text, url }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
@@ -899,14 +904,14 @@ async function exportPdf(iso2) {
   sheet.className = 'print-sheet';
   sheet.dir = 'rtl';
   sheet.innerHTML = `<div class="pdf-head"><div class="pdf-brand">🌍 מפת מטיילים</div>
-      <div class="pdf-meta">${dmy(state.from)} – ${dmy(state.to)} · הופק ב־${dmy(today())}</div></div>
+      <div class="pdf-meta">${dmy(pd().from)} – ${dmy(pd().to)} · הופק ב־${dmy(today())}</div></div>
     ${$('#panelBody').innerHTML}
     <div class="pdf-foot" dir="ltr">${esc(location.href)}</div>`;
   sheet.querySelectorAll('.p-actions, .trip, button, details.how').forEach(n => n.remove());
   sheet.querySelectorAll('details').forEach(d => { d.open = true; });
   document.body.appendChild(sheet);
   const title = document.title;
-  document.title = `${nameHe(iso2, iso2)} ${dmy(state.from)} – מפת מטיילים`;   // default PDF file name
+  document.title = `${nameHe(iso2, iso2)} ${dmy(pd().from)} – מפת מטיילים`;   // default PDF file name
   const done = () => { document.title = title; sheet.remove(); window.removeEventListener('afterprint', done); };
   window.addEventListener('afterprint', done);
   toast('בחלון ההדפסה בחרו "שמירה כ־PDF"', 5000);
@@ -929,12 +934,22 @@ function factsItem(iso2) {
   </dl></div>`;
 }
 
+// a collapsible panel section; open unless the viewer closed it before (remembered per section)
+function fold(id, title, body) {
+  return `<details class="card fold" data-fold="${id}" ${state.folds[id] === false ? '' : 'open'}>
+    <summary><h3 id="${id}Title">${title}</h3></summary><div id="${id}Body">${body}</div></details>`;
+}
+$('#panelBody').addEventListener('toggle', e => {   // 'toggle' doesn't bubble: listen in the capture phase
+  const id = e.target.dataset?.fold; if (!id) return;
+  state.folds[id] = e.target.open;
+  try { localStorage.setItem('tm-folds', JSON.stringify(state.folds)); } catch {}
+}, true);
 function eventsCard(iso2) {
-  const ev = eventsInRange(iso2);
-  return `<section class="card"><h3>🎉 אירועים עונתיים</h3>${ev.length ? `<ul class="list">${ev.map(e =>
+  const ev = eventsInRange(iso2, pd().from, pd().to);
+  return fold('ev', '🎉 אירועים עונתיים', `${ev.length ? `<ul class="list">${ev.map(e =>
     `<li>${CAT_ICON[e.cat] || ''} ${esc(e.name)} <small>${CAT_NAME[e.cat] || ''} · ${esc(e.city)} · ${dmy(e.start)} – ${dmy(e.end)}${e.approx ? ' (תאריך משוער)' : ''}</small></li>`).join('')}</ul>`
     : '<div class="empty">אין אירועים במאגר בתאריכים אלה</div>'}
-    <div class="meta">מאגר אירועים מקומי (data/events.json) · תאריכים משוערים יש לאמת באתר האירוע</div></section>`;
+    <div class="meta">מאגר אירועים מקומי (data/events.json) · תאריכים משוערים יש לאמת באתר האירוע</div>`);
 }
 
 let panelToken = 0;
@@ -991,9 +1006,9 @@ function nearestAirport(lat, lon, iso2) {
   return best || inCountry;
 }
 function tripLinks(iso2, city) {
-  const from = state.from, to = state.to > state.from ? state.to : addDays(state.from, 1);
+  const { from, to: back } = pd(), to = back > from ? back : addDays(from, 1);
   const iata = city && ((typeof city[5] === 'string' && city[5]) || MAIN_AIRPORT[city[1]] || (state.airports && nearestAirport(city[3], city[4], iso2)));
-  let flights = `https://www.skyscanner.co.il/transport/flights/tlv/${(iata || iso2).toLowerCase()}/${yymmdd(from)}/${yymmdd(state.to)}/`;
+  let flights = `https://www.skyscanner.co.il/transport/flights/tlv/${(iata || iso2).toLowerCase()}/${yymmdd(from)}/${yymmdd(back)}/`;
   if (AFFILIATE.skyscannerWrap) flights = AFFILIATE.skyscannerWrap.replace('{url}', encodeURIComponent(flights));
   const q = new URLSearchParams({ ss: city ? `${city[1]}, ${state.features[iso2].properties.en}` : state.features[iso2].properties.en,
     checkin: from, checkout: to, group_adults: 2, no_rooms: 1, group_children: 0 });
@@ -1054,6 +1069,10 @@ async function renderPanel() {
     <div class="p-head">
       <img src="https://flagcdn.com/w160/${iso2.toLowerCase()}.png" alt="" onerror="this.remove()">
       <div><h2>${esc(nameHe(iso2, p.he || p.en))}</h2><div class="en">${esc(p.en)}</div></div>
+      <div class="p-dates${state.pdates ? ' custom' : ''}">
+        <input id="pDates" readonly aria-label="תאריכים למדינה זו" title="שינוי התאריכים למדינה זו בלבד">
+        ${state.pdates ? '<button class="p-dates-reset" data-act="pdreset" title="חזרה לתאריכי המפה">↺</button>' : ''}
+      </div>
     </div>
     <div class="p-actions">
       <button data-act="zoom">🔍 התקרבו למדינה</button>
@@ -1063,16 +1082,15 @@ async function renderPanel() {
     ${tripRow(iso2)}
     ${riskCard(iso2)}
     ${nscNote(iso2)}
-    <div class="daterange">📆 ${dmy(state.from)} – ${dmy(state.to)}</div>
-    <section class="card" id="wxCard"><h3>🌤️ מזג אוויר${pt?.label ? ` · ${esc(pt.label)}` : ''}</h3><div class="spinner">טוען…</div></section>
+    ${fold('wx', `🌤️ מזג אוויר${pt?.label ? ` · ${esc(pt.label)}` : ''}`, '<div class="spinner">טוען…</div>')}
     ${visaItem(iso2)}
-    <section class="card" id="holCard"><h3>📅 חגים רשמיים</h3><div class="spinner">טוען…</div></section>
+    ${fold('hol', '📅 חגים רשמיים', '<div class="spinner">טוען…</div>')}
     ${eventsCard(iso2)}
     ${practicalSection(iso2)}`;
 
+  setupPanelDates();
   // weather
   fillMoney(iso2, token);
-  $('#panelBody .practical')?.addEventListener('toggle', e => { state.practicalOpen = e.target.open; });
   if (!pt) { fillShabbat(null, null, token); fillDaylight([], '', token); }
   if (pt) countryWeather(pt).then(({ plan, tz, days }) => {
     if (token !== panelToken) return;
@@ -1083,16 +1101,16 @@ async function renderPanel() {
     const rainy = days.filter(d => d.rain >= 1).length;
     const note = plan.kind === 'estimate' ? 'הערכה: אותם תאריכים בשנה שעברה (מעבר לטווח התחזית של 16 יום)'
       : plan.kind === 'actual' ? 'נתונים היסטוריים בפועל' : 'תחזית';
-    $('#wxCard').innerHTML = `<h3>🌤️ מזג אוויר${pt.label ? ` · ${esc(pt.label)}` : ''}</h3>
-      <div class="wxsum"><span>מקס׳ <b class="hi">${Math.round(hi)}°</b></span><span>מינ׳ <b class="lo">${Math.round(lo)}°</b></span><span>ימי גשם <b>${rainy}</b>/${days.length}</span></div>
+    $('#wxBody').innerHTML = `<div class="wxsum"><span>מקס׳ <b class="hi">${Math.round(hi)}°</b></span><span>מינ׳ <b class="lo">${Math.round(lo)}°</b></span><span>ימי גשם <b>${rainy}</b>/${days.length}</span></div>
       <div id="citiesWx"></div>
       <table class="wx"><tr><th>יום</th><th></th><th>מקס׳</th><th>מינ׳</th><th>משקעים</th></tr>
-      ${days.map(d => { const [ic, t] = WX(d.code); return `<tr><td>${dayLabel(d.date)}</td><td title="${t}">${ic}</td>
+      ${days.map((d, k) => { const [ic, t] = WX(d.code); return `<tr${k >= 6 ? ' class="more"' : ''}><td>${dayLabel(d.date)}</td><td title="${t}">${ic}</td>
         <td class="hi">${d.hi == null ? '–' : Math.round(d.hi) + '°'}</td><td class="lo">${d.lo == null ? '–' : Math.round(d.lo) + '°'}</td>
         <td>${d.rain == null ? '–' : d.rain.toFixed(1) + ' מ״מ'}</td></tr>`; }).join('')}</table>
+      ${days.length > 6 ? `<button class="linkbtn wx-more" data-act="wxmore">עוד ${days.length - 6} ימים ▾</button>` : ''}
       <div class="meta">${note} · Open-Meteo</div>`;
     loadCitiesWx(iso2, token);
-  }).catch(e => { console.error(e); if (token === panelToken) $('#wxCard').querySelector('.spinner').textContent = 'לא הצלחנו לטעון מזג אוויר'; });
+  }).catch(e => { console.error(e); if (token === panelToken && $('#wxBody .spinner')) $('#wxBody .spinner').textContent = 'לא הצלחנו לטעון מזג אוויר'; });
 
   // holidays
   holidays(iso2).then(list => {
@@ -1103,10 +1121,29 @@ async function renderPanel() {
         return `<li>${esc(h.localName)}${h.localName !== h.name ? ` <small>${esc(h.name)} · ${when}</small>` : ` <small>${when}</small>`}</li>`;
       }).join('')}</ul>`
       : '<div class="empty">אין חגים רשמיים בתאריכים אלה</div>';
-    $('#holCard').innerHTML = `<h3>📅 חגים רשמיים</h3>${body}<div class="meta">${iso2 === 'IL' ? 'Hebcal' : 'Nager.Date'}</div>`;
+    $('#holBody').innerHTML = `${body}<div class="meta">${iso2 === 'IL' ? 'Hebcal' : 'Nager.Date'}</div>`;
   });
 }
 
+// the panel's own date range: changes this country's information only, not the map
+let pfp;
+function setupPanelDates() {
+  pfp?.destroy();
+  const { from, to } = pd();
+  pfp = flatpickr('#pDates', {
+    mode: 'range', dateFormat: 'd/m/y', disableMobile: true, static: true, monthSelectorType: 'static',
+    locale: { ...flatpickr.l10ns.he, rangeSeparator: ' – ' }, defaultDate: [parse(from), parse(to)],
+    onReady: (_, __, inst) => setupMonthPicker(inst),
+    onClose: (sel, _, inst) => {
+      if (sel.length !== 2) return inst.setDate([parse(from), parse(to)], false);
+      let f = iso(sel[0]), t = iso(sel[1]);
+      if (daysBetween(f, t) > MAX_DAYS - 1) { t = addDays(f, MAX_DAYS - 1); toast(`טווח מקסימלי: ${MAX_DAYS} ימים`); }
+      if (f === from && t === to) return;
+      state.pdates = f === state.from && t === state.to ? null : { from: f, to: t };
+      setTimeout(renderPanel);   // not from inside the picker's own callback: renderPanel destroys it
+    },
+  });
+}
 $('#panelBody').addEventListener('click', e => {
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'zoom') {
@@ -1116,14 +1153,25 @@ $('#panelBody').addEventListener('click', e => {
     fitCountry(iso2);
   }
   if (act === 'jewish') showJewishFor(state.selected);
+  if (act === 'pdreset') { state.pdates = null; renderPanel(); }
+  if (act === 'wxmore') { e.target.closest('[data-fold]').querySelector('table.wx:not(.cities)').classList.add('all'); e.target.remove(); }
   if (act === 'share') shareCountry(state.selected);
   if (act === 'pdf') exportPdf(state.selected);
 });
 function closePanel() {
-  $('#panel').hidden = true; state.selected = null; pointMarker.remove(); restyle(); saveHash();
+  $('#panel').hidden = true; state.selected = null; state.pdates = null; pointMarker.remove(); restyle(); saveHash();
   resetPageZoom();
 }
 $('#close').addEventListener('click', closePanel);
+
+// ---------- first visit: what a click on a country opens ----------
+function hideIntro() {
+  if ($('#intro').hidden) return;
+  $('#intro').hidden = true;
+  try { localStorage.setItem('tm-intro', '1'); } catch {}
+}
+try { if (!localStorage.getItem('tm-intro')) $('#intro').hidden = false; } catch { $('#intro').hidden = false; }
+$('#introOk').addEventListener('click', hideIntro);
 
 // ---------- search ----------
 // While typing: countries (local) + Photon (built for search-as-you-type).
@@ -1243,7 +1291,7 @@ function pick(it) {
 function setDates(from, to, { silent = false } = {}) {
   if (to < from) to = from;
   if (daysBetween(from, to) > MAX_DAYS - 1) { to = addDays(from, MAX_DAYS - 1); if (!silent) toast(`טווח מקסימלי: ${MAX_DAYS} ימים`); }
-  state.from = from; state.to = to;
+  state.from = from; state.to = to; state.pdates = null;
   fp.setDate([parse(from), parse(to)], false);
 }
 async function datesChanged() {
@@ -1274,7 +1322,7 @@ function setupMonthPicker(inst) {
   cal.appendChild(panel);
   let year;
   const draw = () => {
-    panel.innerHTML = `<div class="mp-year"><button data-y="-1" aria-label="שנה קודמת">›</button><b>${year}</b><button data-y="1" aria-label="שנה הבאה">‹</button></div>
+    panel.innerHTML = `<div class="mp-year"><button data-y="-1" aria-label="שנה קודמת">‹</button><b>${year}</b><button data-y="1" aria-label="שנה הבאה">›</button></div>
       <div class="mp-grid">${names.map((n, m) => `<button data-m="${m}" class="${m === inst.currentMonth && year === inst.currentYear ? 'cur' : ''}${m === new Date().getMonth() && year === new Date().getFullYear() ? ' today' : ''}">${n}</button>`).join('')}</div>
       <button class="mp-today">היום</button>`;
   };
