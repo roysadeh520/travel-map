@@ -11,7 +11,23 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <!-- bump ?v= on every release so browsers don't keep a stale copy (GitHub Pages caches for 10 min) -->
-<link rel="stylesheet" href="style.css?v=2026100831">
+<link rel="stylesheet" href="style.css?v=2026100833">
+<!-- usage analytics (PostHog, US cloud): page views plus the site's own events (app.js: track()).
+     No session recording; every event carries site=live on GitHub Pages and site=dev on a local copy. -->
+<script type="module">
+  import posthog from 'https://cdn.jsdelivr.net/npm/posthog-js@1.434.13/dist/module.js';
+  posthog.init('phc_wBrpg6sxMi9FX2pa6mXWwFSUjUcpeBNR4izFB29zTZTA', {
+    api_host: 'https://us.i.posthog.com',
+    person_profiles: 'always',   // every visitor gets a profile, so new vs returning can be measured
+    disable_session_recording: true,
+    // on every event, the first page view included
+    before_send: e => { if (e) e.properties.site = location.hostname.endsWith('github.io') ? 'live' : 'dev'; return e; },
+    loaded: ph => {
+      window.posthog = ph;
+      window.dispatchEvent(new Event('posthog-ready'));
+    },
+  });
+</script>
 </head>
 <body>
 <header class="topbar">
@@ -84,6 +100,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/he.min.js"></script>
-<script src="app.js?v=2026100831"></script>
+<script src="app.js?v=2026100833"></script>
 </body>
 </html>

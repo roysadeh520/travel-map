@@ -99,6 +99,15 @@ const state = {
 };
 const cache = new Map(), quotaOut = new Map();
 
+// ---------- usage analytics (PostHog, loaded by index.html) ----------
+// events wait in a queue until the SDK has loaded; if it never loads (an ad blocker), nothing breaks
+const trackQueue = [];
+function track(event, props = {}) {
+  if (window.posthog?.capture) window.posthog.capture(event, props);
+  else trackQueue.push([event, props]);
+}
+window.addEventListener('posthog-ready', () => { for (const [e, p] of trackQueue.splice(0)) window.posthog.capture(e, p); });
+
 // ---------- date helpers ----------
 // dates the country panel shows: its own range if the viewer changed it there, else the map's
 const pd = () => state.pdates || { from: state.from, to: state.to };
@@ -848,9 +857,10 @@ function resetPageZoom() {
   meta.setAttribute('content', `${VIEWPORT}, maximum-scale=1`);
   setTimeout(() => meta.setAttribute('content', VIEWPORT), 400);
 }
-async function selectCountry(iso2, { zoom = false, point = null } = {}) {
+async function selectCountry(iso2, { zoom = false, point = null, source = 'map' } = {}) {
   const f = state.features[iso2];
   if (!f) return;
+  if (iso2 !== state.selected) track('country_open', { country: iso2, source });
   hideIntro();
   state.folds = {};
   if (iso2 !== state.selected) state.panelReset = true;   // applied once the panel is visible (see renderPanel)
@@ -1073,15 +1083,16 @@ async function shareCountry(iso2) {
   const name = nameHe(iso2, iso2), url = `${location.origin}${location.pathname}#${h}`;
   const text = `${name} · ${dmy(pd().from)}–${dmy(pd().to)} · מפת מטיילים`;
   if (navigator.share) {
-    try { await navigator.share({ title: `מפת מטיילים – ${name}`, text, url }); return; }
+    try { await navigator.share({ title: `מפת מטיילים – ${name}`, text, url }); track('share_country', { country: iso2, method: 'native' }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
   }
-  try { await navigator.clipboard.writeText(url); toast('הדפדפן לא תומך בשיתוף ישיר – הקישור הועתק'); }
+  try { await navigator.clipboard.writeText(url); toast('הדפדפן לא תומך בשיתוף ישיר – הקישור הועתק'); track('share_country', { country: iso2, method: 'copy' }); }
   catch { prompt('העתיקו את הקישור:', url); }
 }
 // The browser's own "Save as PDF" keeps real text (selectable, searchable) and handles Hebrew/RTL correctly,
 // unlike canvas-based PDF libraries.
 async function exportPdf(iso2) {
+  track('pdf_download', { country: iso2 });
   for (let i = 0; i < 25 && $('#panelBody .spinner'); i++) await new Promise(r => setTimeout(r, 300));   // let async sections finish
   document.querySelector('.print-sheet')?.remove();
   const sheet = document.createElement('div');
@@ -1236,6 +1247,14 @@ function refreshTrip() {
   if (old) old.outerHTML = tripRow(iso2);
   else $('#panelBody .p-actions')?.insertAdjacentHTML('afterend', tripRow(iso2));
 }
+// flights / hotels clicks (the links open the booking site in a new tab)
+$('#panelBody').addEventListener('click', e => {
+  const a = e.target.closest('#tripFlights, #tripHotels');
+  if (!a || !state.trip) return;
+  const c = state.trip.city, props = { country: state.trip.iso2, city: c?.[1] || null };
+  if (a.id === 'tripFlights') track('flight_click', { ...props, airport: tripLinks(state.trip.iso2, c).iata || null });
+  else track('hotel_click', props);
+});
 $('#panelBody').addEventListener('change', e => {
   if (e.target.id !== 'tripCity' || !state.trip) return;
   // the chosen destination's own information: weather, daylight, Shabbat times, local time
@@ -1307,6 +1326,7 @@ async function renderPanel() {
     console.error(e);
     const [days] = await normalWeather([pt], pd());
     if (!days) throw e;
+    track('weather_fallback', { reason: /429|quota/.test(e.message) ? 'quota' : 'error' });
     return { plan: { kind: 'normal', limit: /429|quota/.test(e.message) }, days };
   }).then(({ plan, days }) => {
     if (token !== panelToken) return;
@@ -1514,14 +1534,14 @@ function pick(it) {
   searchMarker?.remove();
   q.value = it.title;
   if (it.country) {
-    if (state.features[it.iso2]) return selectCountry(it.iso2, { zoom: true });
+    if (state.features[it.iso2]) return selectCountry(it.iso2, { zoom: true, source: 'search' });
     if (it.bounds) return map.flyToBounds(it.bounds, { maxZoom: 6 });
     return;
   }
   if (it.bounds) map.flyToBounds(it.bounds, { maxZoom: 16, duration: 1 });
   else map.flyTo([it.lat, it.lon], it.zoom || 15, { duration: 1 });
   searchMarker = L.marker([it.lat, it.lon]).addTo(map).bindPopup(`<b>${esc(it.title)}</b><br><small>${esc(it.sub)}</small>`).openPopup();
-  if (state.features[it.iso2]) selectCountry(it.iso2, { point: { lat: it.lat, lon: it.lon, label: it.title } });
+  if (state.features[it.iso2]) selectCountry(it.iso2, { point: { lat: it.lat, lon: it.lon, label: it.title }, source: 'search' });
 }
 
 // ---------- dates ----------
@@ -1590,7 +1610,10 @@ $$('.presets button').forEach(b => b.addEventListener('click', () => {
   }
   datesChanged();
 }));
-$$('.layers button').forEach(b => b.addEventListener('click', () => setLayer(b.dataset.layer)));
+$$('.layers button').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.layer !== state.layer) track('layer_change', { layer: b.dataset.layer });
+  setLayer(b.dataset.layer);
+}));
 
 // ---------- map buttons ----------
 $('#home').addEventListener('click', () => map.flyTo([30, 15], 2.5));
@@ -1750,6 +1773,7 @@ function openFinder(open) {
   document.body.classList.toggle('finder-open', open);
   $('#finderBtn').classList.toggle('on', open);
   if (open) {
+    track('finder_open');
     state.finder = readFinder();
     runFinder();
   } else {
@@ -1788,16 +1812,17 @@ async function shareFinder() {
   h.delete('c');
   const url = `${location.origin}${location.pathname}#${h}`;
   if (navigator.share) {
-    try { await navigator.share({ title: 'מפת מטיילים – מאתר יעדים', text, url }); return; }
+    try { await navigator.share({ title: 'מפת מטיילים – מאתר יעדים', text, url }); track('share_finder', { results: hits.length, method: 'native' }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
   }
-  try { await navigator.clipboard.writeText(`${text}\n${url}`); toast('ההודעה והקישור הועתקו – אפשר להדביק בוואטסאפ'); }
+  try { await navigator.clipboard.writeText(`${text}\n${url}`); toast('ההודעה והקישור הועתקו – אפשר להדביק בוואטסאפ'); track('share_finder', { results: hits.length, method: 'copy' }); }
   catch { prompt('העתיקו את הקישור:', url); }
 }
 $('#finder').addEventListener('change', () => { state.finderAll = false; runFinder(); });
 const PRESETS = { sun: [26, 34], mild: [16, 26], snow: [-15, 2] };
 $('#finder .f-presets').addEventListener('click', e => {
-  const p = PRESETS[e.target.closest('[data-preset]')?.dataset.preset]; if (!p) return;
+  const name = e.target.closest('[data-preset]')?.dataset.preset, p = PRESETS[name]; if (!p) return;
+  track('finder_preset', { preset: name });
   [$('#fTmin').value, $('#fTmax').value] = p;
   $('#fTempOn').checked = true; $('#fDays').value = 'most';
   state.finderAll = false; runFinder();
@@ -1811,7 +1836,7 @@ $('#finder').addEventListener('input', e => {
 $('#fResults').addEventListener('click', e => {
   if (e.target.closest('[data-more]')) { state.finderAll = true; $('#fResults .f-list').classList.remove('short'); e.target.remove(); return; }
   const iso = e.target.closest('[data-iso]')?.dataset.iso;
-  if (iso && state.features[iso]) selectCountry(iso, { zoom: true });
+  if (iso && state.features[iso]) selectCountry(iso, { zoom: true, source: 'finder' });
   else if (iso) fitCountry(iso);   // an area without a country panel: just show it
 });
 
@@ -1907,5 +1932,5 @@ function applyFinderHash(p) {
   if (['combined', 'adl', 'nsc'].includes(h.mode)) state.riskMode = h.mode;
   await setLayer(['risk', 'temp', 'events'].includes(h.layer) ? h.layer : 'risk');
   if (h.finder) applyFinderHash(h.finder);
-  if (h.c && state.features[h.c]) { await citiesReady; selectCountry(h.c, { zoom: true }); }   // capital names in Hebrew
+  if (h.c && state.features[h.c]) { await citiesReady; selectCountry(h.c, { zoom: true, source: 'link' }); }   // capital names in Hebrew
 })();
