@@ -1880,17 +1880,19 @@ async function shareFinder() {
   const f = state.finder, hits = state.finderHits || [];
   if (!f) return;
   const name = iso2 => nameHe(iso2, (state.features[iso2] || state.areas[iso2]).properties.he || (state.features[iso2] || state.areas[iso2]).properties.en);
-  const deg = t => Math.round(t.lo) === Math.round(t.hi) ? `${Math.round(t.hi)}°` : `${Math.round(t.lo)}–${Math.round(t.hi)}°`;
+  // numbers, ° and dates inside a left-to-right isolate (U+2066…U+2069), so chat apps don't reorder them in Hebrew text
+  const ltrIso = x => `\u2066${x}\u2069`;
+  const deg = t => ltrIso(Math.round(t.lo) === Math.round(t.hi) ? `${Math.round(t.hi)}°` : `${Math.round(t.lo)}–${Math.round(t.hi)}°`);
   const DAYS = { any: 'לפחות ביום אחד', most: 'ברוב הימים', all: 'בכל הימים' };
   const filters = [
-    f.tempOn && `${f.tmin}°–${f.tmax}° ${DAYS[f.days]}`,
+    f.tempOn && `${ltrIso(`${f.tmin}°–${f.tmax}°`)} ${DAYS[f.days]}`,
     f.risk <= 100 ? `סיכון ${$('#fRisk').selectedOptions[0].textContent}` : null,
     f.visa && 'בלי ויזה מראש', f.events && 'עם אירוע בתאריכים',
   ].filter(Boolean);
   // the place the temperature is for, as in the list (a city or tourist spot when it is not the capital)
   const top = hits.slice(0, FINDER_SHARE_TOP).map(h => `${name(h.iso2)}${h.t ? `${h.t.capital ? '' : ` (${h.t.label})`} ${deg(h.t)}` : ''}`);
   const more = hits.length > FINDER_SHARE_TOP ? ` (ועוד ${hits.length - FINDER_SHARE_TOP})` : '';
-  const text = `🎯 יעדים ל־${dmy(state.from).slice(0, 5)}–${dmy(state.to)}${filters.length ? ` · ${filters.join(' · ')}` : ''}:\n`
+  const text = `🎯 יעדים ל־${ltrIso(`${dmy(state.from).slice(0, 5)}–${dmy(state.to)}`)}${filters.length ? ` · ${filters.join(' · ')}` : ''}:\n`
     + (top.length ? `${top.join(' · ')}${more}` : 'לא נמצאו יעדים') + '\nלכל היעדים על המפה:';
   // the search only: a country panel open while sharing is not part of it
   const h = new URLSearchParams(location.hash.slice(1));
