@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <!-- globe with a map pin: the site's 🌍 plus "click a country" -->
+  <circle cx="24" cy="27" r="18" fill="#2f6fde"/>
+  <path d="M12.5 21.5c3.5-2.2 6.5 1.6 10-.4s3.6-5.4 7.6-3.4c3.2 1.6-.6 6.6-4.6 7.6s-5.2 5.6-8.6 3.4c-2.8-1.8-5.6-5.6-4.4-7.2z" fill="#7ccf6b"/>
+  <path d="M29 33c2.4-1 5.2.2 6.4 2.4-1.6 2.6-4.6 4.4-7.6 4.8-.8-2.4-.4-6.2 1.2-7.2z" fill="#7ccf6b"/>
+  <path d="M24 3.5c-5.2 0-9.4 4.1-9.4 9.2 0 7 9.4 15.3 9.4 15.3s9.4-8.3 9.4-15.3c0-5.1-4.2-9.2-9.4-9.2z" fill="#e0592a" stroke="#fff" stroke-width="2.2"/>
+  <circle cx="24" cy="12.8" r="3.4" fill="#fff"/>
+</svg>

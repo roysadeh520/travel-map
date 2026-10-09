@@ -6,12 +6,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="only light">
 <title>מפת מטיילים</title>
+<meta name="description" content="מדד סיכון ליהודים וישראלים, מזג אוויר, ויזה, זמני שבת ומאתר יעדים לפי תאריכים – לכל מדינה בעולם.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-48.png" sizes="48x48" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#1d2433">
+<!-- link previews (WhatsApp, Telegram, Facebook…): the image needs an absolute address – update it with a custom domain -->
+<meta property="og:type" content="website">
+<meta property="og:locale" content="he_IL">
+<meta property="og:site_name" content="מפת מטיילים">
+<meta property="og:title" content="מפת מטיילים – בטיחות, מזג אוויר ויעדים">
+<meta property="og:description" content="מדד סיכון ליהודים וישראלים, טמפרטורות ומאתר יעדים לפי התאריכים שלכם">
+<meta property="og:image" content="https://roysadeh520.github.io/travel-map/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <!-- bump ?v= on every release so browsers don't keep a stale copy (GitHub Pages caches for 10 min) -->
-<link rel="stylesheet" href="style.css?v=2026100834">
+<link rel="stylesheet" href="style.css?v=2026100836">
 <!-- usage analytics (PostHog, US cloud): page views plus the site's own events (app.js: track()).
      No session recording; every event carries site=live on GitHub Pages and site=dev on a local copy. -->
 <script type="module">
@@ -55,6 +70,8 @@
       <button data-preset="december">דצמבר</button>
     </div>
   </div>
+  <!-- desktop only: on a phone feedback is reached from the country card, the finder and the map corner -->
+  <button id="fbBtn" class="fb-btn" data-open="feedback">💬 משוב</button>
 </header>
 
 <main>
@@ -69,6 +86,7 @@
     <b>💡 לחצו על מדינה כדי לראות את כל המידע עליה</b>
     <div class="intro-list">🧭 מדד סיכון · 🌤️ מזג אוויר · 🛂 ויזה · 🕯️ זמני שבת · 📅 חגים ואירועים · 💱 מטבע · ✈️ טיסות ומלונות</div>
     <button id="introOk">הבנתי</button>
+    <div class="intro-about"><button class="linkbtn" data-open="about">אודות ופרטיות</button></div>
   </div>
   <div id="finder" hidden>
     <div class="f-head"><h3>🎯 מאתר יעדים</h3><button id="fShare" class="f-share" aria-label="שיתוף החיפוש"></button><button id="fMap" class="f-map" title="הצג את התוצאות על המפה (הסינון נשאר)" aria-label="הצג את התוצאות על המפה">🗺️</button><button id="fClose" title="סגירה">✕</button></div>
@@ -91,6 +109,9 @@
   </div>
   <div id="toast" hidden></div>
 
+  <!-- about & privacy / feedback window -->
+  <div id="modal" hidden><div class="m-card" role="dialog" aria-modal="true"><button class="m-close" aria-label="סגירה">✕</button><div id="modalBody"></div></div></div>
+
   <aside id="panel" hidden>
     <button id="close" title="סגירה">✕</button>
     <div id="panelBody"></div>
@@ -100,6 +121,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/he.min.js"></script>
-<script src="app.js?v=2026100834"></script>
+<script src="app.js?v=2026100836"></script>
 </body>
 </html>

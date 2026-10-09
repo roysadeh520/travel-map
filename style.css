@@ -519,3 +519,53 @@ body.finder-open #legend { display: none; }
 .f-city { color: var(--muted); font-size: 11.5px; }
 .f-why { font-size: 12px; color: #8a4600; background: #fff4e5; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
 .f-ev { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+
+/* ---------- about & privacy / feedback ---------- */
+/* desktop: the last item of the top bar, at its left end */
+.fb-btn {
+  margin-inline-start: auto; border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
+  padding: 6px 12px; color: var(--muted); font-size: 13.5px;
+}
+.fb-btn:hover { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 760px) { .fb-btn { display: none; } }
+.disclaimer { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.legend-note { margin-top: 2px; }
+.legend-note .linkbtn { font-size: 11px; }
+.fb-link { display: block; margin: 14px auto 2px; font-size: 13px; }
+.intro-about { margin-top: 6px; }
+.intro-about .linkbtn { font-size: 12px; color: var(--muted); text-decoration: underline; }
+.leaflet-control-attribution a[data-open] { font-weight: 600; }
+#modal {
+  position: fixed; inset: 0; z-index: 3000; background: rgba(20, 24, 33, .45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+#modal[hidden] { display: none; }
+.m-card {
+  position: relative; width: min(520px, 100%); max-height: calc(100vh - 32px); overflow-y: auto;
+  background: var(--surface); border-radius: 14px; box-shadow: var(--shadow); padding: 18px 20px 20px; font-size: 14px; line-height: 1.6;
+}
+.m-card h3 { margin: 0 0 8px; font-size: 18px; }
+.m-card h4 { margin: 14px 0 4px; font-size: 15px; }
+.m-card p { margin: 0 0 6px; }
+.m-card ul { margin: 0; padding-inline-start: 18px; }
+.m-card li { margin-bottom: 4px; }
+.m-card .linkbtn { font-size: inherit; text-decoration: underline; }
+.m-close {
+  position: sticky; top: 0; float: left; border: 0; background: var(--bg); width: 30px; height: 30px;
+  border-radius: 50%; color: var(--muted);
+}
+.fb-about { margin-bottom: 8px; }
+.fb-mood { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.fb-mood label { border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; cursor: pointer; font-size: 13.5px; }
+.fb-mood label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.fb-mood input { position: absolute; opacity: 0; pointer-events: none; }
+#fbText {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 10px; resize: vertical;
+}
+#fbText:focus { outline: none; border-color: var(--accent); }
+.fb-send { margin-top: 10px; border: 0; background: var(--accent); color: #fff; border-radius: 10px; padding: 8px 22px; font-size: 14.5px; }
+@media (max-width: 760px) {
+  #modal { align-items: flex-end; padding: 0; }
+  .m-card { border-radius: 16px 16px 0 0; max-height: 85vh; padding: 16px 16px 22px; }
+}

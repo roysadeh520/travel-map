@@ -439,6 +439,9 @@ const map = L.map('map', {
   zoomControl: true, minZoom: 2, maxZoom: 18, worldCopyJump: false,
   maxBounds: [[-85, -220], [85, 220]], maxBoundsViscosity: 0.8, preferCanvas: true,
 }).setView([30, 15], 2.5);
+// about & privacy and feedback links in the map's credits corner: always there, takes no room on a phone
+map.attributionControl.setPrefix('<a href="#" data-open="about">אודות ופרטיות</a> · <a href="#" data-open="feedback" data-from="corner">משוב</a> · '
+  + '<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
 // Up to zoom 7 a label-free basemap with our own Hebrew labels on top; from zoom 8 OpenStreetMap,
 // whose street and place names are needed for addresses (country names are not shown that close anyway)
 const LABEL_MAX_ZOOM = 7;
@@ -806,7 +809,8 @@ function drawLegend() {
     else if (state.riskMode === 'adl') body = `${rows(ANTI.map(a => ({ color: a.color, label: `${a.label} · ${ltr(a.range)}` })))}${rows([{ color: NODATA, label: 'לא נסקרה' }])}
       <div class="sub">אחוז המבוגרים עם עמדות אנטישמיות · <a href="${esc(state.antiMeta.url)}" target="_blank" rel="noopener">ADL Global 100</a>, סקר 01/2025</div>`;
     else body = `${rows(RISK.map((b, i) => ({ color: b.color, label: `${b.label} · ${ltr(`${i * 20}–${i === 4 ? 100 : i * 20 + 20}`)}` })))}${rows([{ color: NODATA, label: 'אין נתונים' }])}${dashed}
-      <div class="sub">60% אזהרת המל״ל (עדכני) + 40% עמדות אנטישמיות (ADL 01/2025). אזהרת רמה 4 → לפחות 80, רמה 3 → לפחות 60.</div>`;
+      <div class="sub">60% אזהרת המל״ל (עדכני) + 40% עמדות אנטישמיות (ADL 01/2025). אזהרת רמה 4 → לפחות 80, רמה 3 → לפחות 60.</div>
+      <div class="sub legend-note">מדד שלנו, לא ייעוץ · <button class="linkbtn" data-open="about">פרטים</button></div>`;
     L_.innerHTML = `<h4>מדד סיכון ליהודים וישראלים</h4>${seg}${body}`;
   } else if (state.layer === 'temp') {
     const ticks = [-20, -10, 0, 10, 20, 30, 40];
@@ -930,6 +934,8 @@ function riskCard(iso2) {
       אזהרה משולבת נחשבת כרמה הנמוכה בתוספת 30% מהפער לרמה הגבוהה.
       אזהרת רמה 4 לכל המדינה מעלה את המדד ל־80 לפחות, ורמה 3 ל־60 לפחות.
     </details>
+    <div class="disclaimer">ℹ️ מדד שלנו לפי אזהרות המל״ל ונתוני ADL – לא ייעוץ ולא תחליף לאזהרה הרשמית ·
+      <a href="${esc(w?.url || state.nscMeta.url || 'https://www.gov.il/he/departments/news/travel-warnings')}" target="_blank" rel="noopener">לאתר המל״ל</a></div>
   </section>`;
 }
 
@@ -1311,7 +1317,8 @@ async function renderPanel() {
     ${fold('wx', `🌤️ מזג אוויר${pt?.label ? ` · ${esc(pt.label)}` : ''}`, '<div class="spinner">טוען…</div>')}
     ${fold('hol', '📅 חגים רשמיים', '<div class="spinner">טוען…</div>')}
     ${eventsCard(iso2)}
-    ${practicalSection(iso2)}`;
+    ${practicalSection(iso2)}
+    <button class="linkbtn fb-link" data-open="feedback" data-from="panel" data-country="${iso2}">משהו לא מדויק כאן? ספרו לנו</button>`;
 
   setupPanelDates();
   // weather
@@ -1431,6 +1438,81 @@ function hideIntro() {
 }
 try { if (!localStorage.getItem('tm-intro')) $('#intro').hidden = false; } catch { $('#intro').hidden = false; }
 $('#introOk').addEventListener('click', hideIntro);
+
+// ---------- about & privacy / feedback window ----------
+function openModal(html) {
+  $('#modalBody').innerHTML = html;
+  $('#modal').hidden = false;
+  $('#modal .m-card').scrollTop = 0;
+}
+function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; }
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal' || e.target.closest('.m-close')) closeModal(); });
+addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
+
+function aboutHTML() {
+  return `<h3>🌍 על מפת מטיילים</h3>
+    <p>מפה למטיילים ישראלים ויהודים: לכל מדינה מדד סיכון, מזג אוויר לתאריכים שלכם, ויזה לדרכון ישראלי, זמני שבת וחגים,
+      אירועים ומידע מעשי, ומאתר יעדים לפי טמפרטורה וסיכון. השימוש חינמי.</p>
+    <h4>🧭 מדד הסיכון</h4>
+    <p>המדד הוא חישוב שלנו: 60% אזהרת המסע העדכנית של <a href="${esc(state.nscMeta.url || 'https://www.gov.il/he/departments/news/travel-warnings')}" target="_blank" rel="noopener">המל״ל</a>
+      ו־40% שיעור העמדות האנטישמיות לפי סקר ADL. הוא לא ייעוץ ולא תחליף לאזהרת המסע הרשמית –
+      לפני נסיעה בדקו תמיד את אזהרת המל״ל המלאה. המידע באתר (מזג אוויר, ויזה, אירועים, זמנים) נאסף ממקורות ציבוריים,
+      ייתכנו בו טעויות, ואין לראות בו ייעוץ מכל סוג.</p>
+    <h4>🔒 פרטיות</h4>
+    <ul>
+      <li>אנחנו מודדים שימוש באתר בעזרת PostHog: אילו דפים ואפשרויות נפתחו (למשל איזו מדינה, לחיצה על טיסות), באיזה מכשיר ודפדפן.
+        כתובת ה־IP משמשת רק לזיהוי מדינה ועיר משוערות, ולא נשמרת.</li>
+      <li>כדי לדעת אם חזרתם לאתר, נשמר בדפדפן מזהה אקראי (עוגייה ואחסון מקומי). הוא לא מזהה אתכם אישית.</li>
+      <li>לא נאספים שם, מייל, טלפון או מיקום מדויק. אין הקלטה של הגלישה ואין פרסומות.</li>
+      <li>הדפדפן שומר אצלכם העדפות (למשל אם ראיתם את ההסבר) ותוצאות מזג אוויר לזמן קצר, כדי שהאתר ייטען מהר.</li>
+      <li>כדי להציג מפות, מזג אוויר, חגים ושערי מטבע, הדפדפן פונה ישירות לשירותים ציבוריים (למשל OpenStreetMap, Open-Meteo, Hebcal),
+        שרואים את כתובת ה־IP כמו בכל גלישה.</li>
+      <li>מה שתכתבו בטופס המשוב נשמר כדי שנוכל לקרוא אותו – אל תכתבו בו פרטים אישיים.</li>
+    </ul>
+    <h4>💬 יצירת קשר</h4>
+    <p>הערות, טעויות או רעיונות – <button class="linkbtn" data-open="feedback">כתבו לנו</button>.</p>
+    <div class="meta">נתונים: המל״ל · ADL · Open-Meteo · NASA POWER · Hebcal · Nager.Date · OpenStreetMap · Esri</div>`;
+}
+
+// feedback is sent to the site's analytics (PostHog) as a 'feedback' event; nothing in the page says where it goes
+function feedbackHTML(iso2) {
+  const about = iso2 && state.features[iso2] ? nameHe(iso2, iso2) : '';
+  return `<h3>💬 משוב</h3>
+    <form id="fbForm" data-country="${iso2 || ''}">
+      ${about ? `<div class="fb-about">על: <b>${esc(about)}</b></div>` : ''}
+      <div class="fb-mood" role="radiogroup" aria-label="איך האתר?">
+        <label><input type="radio" name="mood" value="good"> 👍 עוזר לי</label>
+        <label><input type="radio" name="mood" value="bad"> 👎 משהו לא עובד / לא מדויק</label>
+      </div>
+      <textarea id="fbText" maxlength="1000" rows="5" placeholder="${about ? `מה לא מדויק ב${esc(about)}? מה היית רוצה לראות?` : 'מה עבד, מה חסר, מה לא מדויק?'}"></textarea>
+      <div class="meta">בלי פרטים אישיים, בבקשה.</div>
+      <button type="submit" class="fb-send">שליחה</button>
+    </form>`;
+}
+function openFeedback(iso2, from) {
+  openModal(feedbackHTML(iso2));
+  $('#fbForm').dataset.from = from;
+  setTimeout(() => $('#fbText')?.focus(), 50);
+}
+$('#modalBody').addEventListener('submit', e => {
+  if (e.target.id !== 'fbForm') return;
+  e.preventDefault();
+  const f = e.target, text = $('#fbText').value.trim(), mood = f.querySelector('[name=mood]:checked')?.value || null;
+  if (!text && !mood) { toast('כתבו כמה מילים או בחרו 👍 / 👎'); return; }
+  // without the analytics library (an ad blocker) the message cannot be sent: say so instead of losing it
+  if (!window.posthog?.capture) { toast('לא הצלחנו לשלוח – ייתכן שחוסם פרסומות חוסם את הטופס', 4500); return; }
+  track('feedback', { text: text.slice(0, 1000), mood, country: f.dataset.country || null, from: f.dataset.from || 'site' });
+  closeModal();
+  toast('תודה! קיבלנו 🙏');
+});
+// every [data-open] in the page: the corner links, the intro card, the top-bar button, the card and finder links
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-open]');
+  if (!b) return;
+  e.preventDefault();
+  if (b.dataset.open === 'about') { openModal(aboutHTML()); track('about_open'); }
+  if (b.dataset.open === 'feedback') openFeedback(b.dataset.country || null, b.dataset.from || 'site');
+}, true);   // capture: Leaflet stops clicks in its credits corner from bubbling
 
 // ---------- search ----------
 // While typing: countries (local) + Photon (built for search-as-you-type).
@@ -1768,7 +1850,8 @@ async function runFinder() {
       <span>${esc(nameHe(h.iso2, (state.features[h.iso2] || state.areas[h.iso2]).properties.he || (state.features[h.iso2] || state.areas[h.iso2]).properties.en))}${f.events ? `<small class="f-ev">${h.ev.map(e => `${CAT_ICON[e.cat] || ''} ${esc(e.name)}`).join(' · ')}</small>` : ''}</span>
       ${h.t ? `${h.t.capital ? '' : `<span class="f-city">${esc(h.t.label)}</span>`}<span class="tchip" dir="ltr" style="background:${tempColor((h.t.lo + h.t.hi) / 2)}">${Math.round(h.t.lo) === Math.round(h.t.hi) ? '' : `${Math.round(h.t.lo)}–`}${Math.round(h.t.hi)}°</span>` : ''}
       ${h.r ? `<span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span>` : '<span class="rchip">–</span>'}</li>`).join('')}</ul>
-    ${hits.length > FINDER_SHORT && !state.finderAll ? `<button class="linkbtn f-more" data-more>הצג את כל ${hits.length} היעדים</button>` : ''}`;
+    ${hits.length > FINDER_SHORT && !state.finderAll ? `<button class="linkbtn f-more" data-more>הצג את כל ${hits.length} היעדים</button>` : ''}
+    <button class="linkbtn fb-link" data-open="feedback" data-from="finder">לא מצאתם מה שחיפשתם? ספרו לנו</button>`;
 }
 function openFinder(open) {
   $('#finder').hidden = !open;
