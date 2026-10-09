@@ -26,7 +26,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
 <!-- bump ?v= on every release so browsers don't keep a stale copy (GitHub Pages caches for 10 min) -->
-<link rel="stylesheet" href="style.css?v=2026100837">
+<link rel="stylesheet" href="style.css?v=2026100842">
 <!-- usage analytics (PostHog, US cloud): page views plus the site's own events (app.js: track()).
      No session recording; every event carries site=live on GitHub Pages and site=dev on a local copy. -->
 <script type="module">
@@ -45,20 +45,21 @@
 </script>
 </head>
 <body>
+<a class="skip" href="#q">דילוג לחיפוש מדינה</a>
 <header class="topbar">
   <h1>🌍 מפת מטיילים</h1>
   <button id="filtersToggle" class="filters-toggle" aria-label="הסתרת הפילטרים">▲</button>
 
   <div class="search">
-    <input id="q" type="search" autocomplete="off" placeholder="חפשו מדינה, עיר או כתובת…">
-    <button id="qbtn" title="חיפוש">🔎</button>
+    <input id="q" type="search" autocomplete="off" placeholder="חפשו מדינה, עיר או כתובת…" aria-label="חיפוש מדינה, עיר או כתובת">
+    <button id="qbtn" title="חיפוש" aria-label="חיפוש">🔎</button>
     <ul id="results" hidden></ul>
   </div>
 
-  <div class="layers" role="tablist">
-    <button data-layer="risk" class="on">מדד סיכון</button>
-    <button data-layer="temp">טמפרטורה</button>
-    <button data-layer="events">אירועים</button>
+  <div class="layers" role="group" aria-label="שכבת המפה">
+    <button data-layer="risk" class="on" aria-pressed="true">מדד סיכון</button>
+    <button data-layer="temp" aria-pressed="false">טמפרטורה</button>
+    <button data-layer="events" aria-pressed="false">אירועים</button>
   </div>
   <button id="finderBtn" class="finder-btn">🎯 מאתר יעדים</button>
 
@@ -75,11 +76,11 @@
 </header>
 
 <main>
-  <div id="map"></div>
+  <div id="map" role="region" aria-label="מפת העולם. לבחירת מדינה בלי עכבר השתמשו בחיפוש"></div>
   <div class="mapbtns">
-    <button id="home" title="תצוגת עולם">🌐</button>
-    <button id="locate" title="המיקום שלי">📍</button>
-    <button id="jewish" title="בתי כנסת ומסעדות כשרות באזור (בזום קרוב)">🕍</button>
+    <button id="home" title="תצוגת עולם" aria-label="תצוגת עולם">🌐</button>
+    <button id="locate" title="המיקום שלי" aria-label="המיקום שלי">📍</button>
+    <button id="jewish" title="בתי כנסת ומסעדות כשרות באזור (בזום קרוב)" aria-label="בתי כנסת ומסעדות כשרות באזור">🕍</button>
   </div>
   <div id="legend"></div>
   <div id="intro" hidden>
@@ -88,8 +89,8 @@
     <button id="introOk">הבנתי</button>
     <div class="intro-about"><button class="linkbtn" data-open="about">אודות ופרטיות</button></div>
   </div>
-  <div id="finder" hidden>
-    <div class="f-head"><h3>🎯 מאתר יעדים</h3><button id="fShare" class="f-share" aria-label="שיתוף החיפוש"></button><button id="fMap" class="f-map" title="הצג את התוצאות על המפה (הסינון נשאר)" aria-label="הצג את התוצאות על המפה">🗺️</button><button id="fClose" title="סגירה">✕</button></div>
+  <div id="finder" role="region" aria-labelledby="fTitle" hidden>
+    <div class="f-head"><h2 id="fTitle">🎯 מאתר יעדים</h2><button id="fShare" class="f-share" aria-label="שיתוף החיפוש"></button><button id="fMap" class="f-map" title="הצג את התוצאות על המפה (הסינון נשאר)" aria-label="הצג את התוצאות על המפה">🗺️</button><button id="fClose" title="סגירה" aria-label="סגירת מאתר היעדים">✕</button></div>
     <div class="f-sub">לפי התאריכים שנבחרו למעלה</div>
     <div class="f-presets">
       <button data-preset="sun" title="26°–34° ברוב הימים">☀️ חופשת שמש</button>
@@ -107,13 +108,13 @@
     <label class="chk"><input type="checkbox" id="fEvents"> רק עם אירוע בתאריכים</label>
     <div id="fResults"></div>
   </div>
-  <div id="toast" hidden></div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
 
   <!-- about & privacy / feedback window -->
-  <div id="modal" hidden><div class="m-card" role="dialog" aria-modal="true"><button class="m-close" aria-label="סגירה">✕</button><div id="modalBody"></div></div></div>
+  <div id="modal" hidden><div class="m-card" role="dialog" aria-modal="true" aria-labelledby="mTitle"><button class="m-close" aria-label="סגירה">✕</button><div id="modalBody"></div></div></div>
 
-  <aside id="panel" hidden>
-    <button id="close" title="סגירה">✕</button>
+  <aside id="panel" aria-labelledby="pName" hidden>
+    <button id="close" title="סגירה" aria-label="סגירת פרטי המדינה">✕</button>
     <div id="panelBody"></div>
   </aside>
 </main>
@@ -121,6 +122,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/he.min.js"></script>
-<script src="app.js?v=2026100837"></script>
+<script src="app.js?v=2026100842"></script>
 </body>
 </html>

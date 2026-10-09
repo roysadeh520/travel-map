@@ -64,7 +64,13 @@ function riskOf(iso2) {
   const bucket = RISK.findIndex(b => score < b.max);
   return { score, bucket, ...RISK[bucket], partial: adl == null ? 'nsc' : nsc == null ? 'adl' : null };
 }
-const darkText = c => (c === '#fdc470' || c === '#f2c94c' ? '#8a6100' : c);
+const lum = hex => { const v = hex.match(/\w\w/g).map(x => parseInt(x, 16) / 255).map(x => (x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4)); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+const darkText = c => {
+  let rgb = c.match(/\w\w/g).map(x => parseInt(x, 16));
+  const hex = () => '#' + rgb.map(x => Math.round(x).toString(16).padStart(2, '0')).join('');
+  while (1.05 / (lum(hex()) + 0.05) < 6.2) rgb = rgb.map(x => x * 0.9);   // 6.2:1 on white, so it still passes 4.5:1 on the light tinted chips
+  return hex();
+};
 const NODATA = '#d5d8de';
 const EVENT_ON = '#8b5cf6', EVENT_OFF = '#ece9f5';
 const CAT_ICON = { music: '🎵', carnival: '🎭', festival: '🎉', film: '🎬', sport: '🏆', christmas: '🎄', nature: '🌸' };
@@ -393,7 +399,7 @@ async function loadCitiesWx(iso2, token) {
         // the city whose information the panel shows (chosen above, clicked here, or the capital)
         const shown = state.point && kmBetween(c, state.point) < 10;
         return `<tr data-city="${k}"${shown ? ' class="sel"' : ''}><td>${esc(c.he)}</td>
-          <td><span class="tchip" style="background:${tempColor(hi)}">${Math.round(hi)}°</span></td>
+          <td><span class="tchip" style="${tempChip(hi)}">${Math.round(hi)}°</span></td>
           <td>${lo == null ? '–' : `<span class="tchip tchip-lo" style="${tempChipLo(lo)}">${Math.round(lo)}°</span>`}</td><td>${rainCell(d, wet)}</td></tr>`;
       }).join('')}</table>`;
     $('#citiesWx').onclick = e => {
@@ -440,13 +446,13 @@ const map = L.map('map', {
   maxBounds: [[-85, -220], [85, 220]], maxBoundsViscosity: 0.8, preferCanvas: true,
 }).setView([30, 15], 2.5);
 // about & privacy and feedback links in the map's credits corner: always there, takes no room on a phone
-map.attributionControl.setPrefix('<a href="#" data-open="about">אודות ופרטיות</a> · <a href="#" data-open="feedback" data-from="corner">משוב</a> · '
+map.attributionControl.setPrefix('<a href="#" data-open="about">אודות ופרטיות</a> · <a href="#" data-open="a11y">נגישות</a> · <a href="#" data-open="feedback" data-from="corner">משוב</a> · '
   + '<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
 // Up to zoom 7 a label-free basemap with our own Hebrew labels on top; from zoom 8 OpenStreetMap,
 // whose street and place names are needed for addresses (country names are not shown that close anyway)
 const LABEL_MAX_ZOOM = 7;
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}', {
-  attribution: 'Tiles &copy; Esri', maxZoom: LABEL_MAX_ZOOM, className: 'base-terrain',
+  attribution: '&copy; Esri', maxZoom: LABEL_MAX_ZOOM, className: 'base-terrain',
 }).addTo(map);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', minZoom: LABEL_MAX_ZOOM + 1, maxZoom: 19,
@@ -519,6 +525,15 @@ function tempRGB(t) {
   return TEMP_STOPS[TEMP_STOPS.length - 1][1];
 }
 const tempColor = t => `rgb(${tempRGB(t).join(',')})`;
+// a temperature chip: its colour with dark text; where dark text would not read (WCAG AA, 4.5:1) the chip is
+// darkened until white text does – mid oranges come out a little deeper in chips, the map keeps its colours
+const tempChip = t => {
+  let c = tempRGB(t);
+  const L = () => lum('#' + c.map(x => Math.round(x).toString(16).padStart(2, '0')).join(''));
+  if ((L() + 0.05) / 0.0665 >= 4.7) return `background:rgb(${c.join(',')});color:#1d2433`;
+  while (1.05 / (L() + 0.05) < 4.6) c = c.map(x => x * 0.93);
+  return `background:rgb(${c.map(Math.round).join(',')});color:#fff`;
+};
 // the minimum's chip: a pale version of the same colour, with text in a dark shade of it
 const tempChipLo = t => { const c = tempRGB(t);
   return `background:rgb(${c.map(v => Math.round(v * 0.45 + 140)).join(',')});color:rgb(${c.map(v => Math.round(v * 0.45)).join(',')})`; };
@@ -779,7 +794,7 @@ function tooltipFor(p) {
     extra = t == null ? '' : `🌡️ כאן: ${Math.round(t)}° <small>(ממוצע רב־שנתי ביום)</small>`;
   }
   else { const ev = eventsInRange(p.iso2); extra = ev.length ? ev.map(e => (CAT_ICON[e.cat] || '') + ' ' + e.name).join('<br>') : 'אין אירועים במאגר בתאריכים אלה'; }
-  return `<b>${esc(n)}</b>${extra ? `<br><span style="color:#6b7385">${extra}</span>` : ''}${TT_CTA}`;
+  return `<b>${esc(n)}</b>${extra ? `<br><span style="color:var(--muted)">${extra}</span>` : ''}${TT_CTA}`;
 }
 
 // event markers (visible on the events layer)
@@ -796,6 +811,7 @@ function drawEventMarkers(only = null) {
 }
 
 // ---------- legend ----------
+const legendTitle = t => `<h2><button class="lg-toggle" aria-expanded="${!$('#legend').classList.contains('mini')}">${t}</button></h2>`;
 function drawLegend() {
   const L_ = $('#legend');
   const rows = (items) => items.map(i => `<div class="row"><span class="sw" style="background:${i.color}"></span>${i.label}</div>`).join('');
@@ -811,16 +827,16 @@ function drawLegend() {
     else body = `${rows(RISK.map((b, i) => ({ color: b.color, label: `${b.label} · ${ltr(`${i * 20}–${i === 4 ? 100 : i * 20 + 20}`)}` })))}${rows([{ color: NODATA, label: 'אין נתונים' }])}${dashed}
       <div class="sub">60% אזהרת המל״ל (עדכני) + 40% עמדות אנטישמיות (ADL 01/2025). אזהרת רמה 4 → לפחות 80, רמה 3 → לפחות 60.</div>
       <div class="sub legend-note">מדד שלנו, לא ייעוץ · <button class="linkbtn" data-open="about">פרטים</button></div>`;
-    L_.innerHTML = `<h4>מדד סיכון ליהודים וישראלים</h4>${seg}${body}`;
+    L_.innerHTML = `${legendTitle('מדד סיכון ליהודים וישראלים')}${seg}${body}`;
   } else if (state.layer === 'temp') {
     const ticks = [-20, -10, 0, 10, 20, 30, 40];
-    L_.innerHTML = `<h4>🌡️ כמה חם ביום?</h4>
+    L_.innerHTML = `${legendTitle('🌡️ כמה חם ביום?')}
       <div class="sub" style="margin:0 0 4px">הצבע מראה את הטמפ׳ המקסימלית (בשעות היום) הרגילה בתאריכים שנבחרו:</div>
       <div class="tbar" style="background:linear-gradient(to right, ${ticks.map(t => tempColor(t)).join(', ')})"></div>
       <div class="tticks">${ticks.map(t => `<span>${t}°</span>`).join('')}</div>
       <div class="sub">ממוצע רב־שנתי לתאריכים האלה (NASA POWER, 2001–2020) – לא תחזית. לחיצה על מדינה מציגה גם תחזית או נתוני אמת.</div>`;
   } else {
-    L_.innerHTML = `<h4>אירועים עונתיים בתאריכים שנבחרו</h4>${rows([{ color: EVENT_ON, label: 'יש אירועים' }, { color: EVENT_OFF, label: 'אין במאגר' }])}
+    L_.innerHTML = `${legendTitle('אירועים עונתיים בתאריכים שנבחרו')}${rows([{ color: EVENT_ON, label: 'יש אירועים' }, { color: EVENT_OFF, label: 'אין במאגר' }])}
       <div class="sub">${Object.keys(CAT_ICON).map(k => `${CAT_ICON[k]} ${CAT_NAME[k]}`).join(' · ')}</div>`;
   }
 }
@@ -839,14 +855,17 @@ try { if (localStorage.getItem('filtersHidden')) setFiltersHidden(true); } catch
 $('#legend').addEventListener('click', e => {
   const mode = e.target.closest('[data-mode]')?.dataset.mode;
   if (mode) { state.riskMode = mode; restyle(); drawLegend(); saveHash(); return; }
-  if (e.target.closest('h4')) $('#legend').classList.toggle('mini');
+  if (e.target.closest('h2')) {
+    const mini = $('#legend').classList.toggle('mini');
+    $('#legend .lg-toggle')?.setAttribute('aria-expanded', String(!mini));
+  }
 });
 if (innerWidth <= 760) $('#legend').classList.add('mini');
 
 // ---------- layer switching ----------
 async function setLayer(layer) {
   state.layer = layer;
-  $$('.layers button').forEach(b => b.classList.toggle('on', b.dataset.layer === layer));
+  $$('.layers button').forEach(b => { b.classList.toggle('on', b.dataset.layer === layer); b.setAttribute('aria-pressed', String(b.dataset.layer === layer)); });
   if (layer === 'events') { drawEventMarkers(); eventLayer.addTo(map); } else eventLayer.remove();
   restyle(); drawLegend(); saveHash();
   if (layer === 'temp') loadHeat(); else drawHeat();
@@ -942,12 +961,12 @@ function riskCard(iso2) {
 function nscNote(iso2) {
   const w = nscFor(iso2);
   if (!w) return '';
-  return `<aside class="note">
+  return `<div class="note" role="note">
     <div class="note-title">📢 הערת המל״ל</div>
     <p class="details">${esc(w.details || NSC[w.level].advice)}</p>
     ${(w.regions || []).map(r => `<p class="details"><b>${esc(r.region)}:</b> ${esc(r.details)}</p>`).join('')}
     <div class="meta">עודכן ${dmyTime(state.nscMeta.updated)}${w.url ? ` · <a href="${esc(w.url)}" target="_blank" rel="noopener">לאזהרה המלאה ב־gov.il</a>` : ''}</div>
-  </aside>`;
+  </div>`;
 }
 
 // ---------- practical info ----------
@@ -961,7 +980,7 @@ const ISRAELI_PLUG_FITS = ['C', 'E', 'F', 'H', 'J', 'K', 'L', 'N'];   // sockets
 function visaItem(iso2) {
   const v = state.practical[iso2]?.visa;
   if (iso2 === 'IL') return '';
-  const [label, color] = v ? VISA[v.type] || [v.type, '#6b7385'] : ['אין מידע', '#6b7385'];
+  const [label, color] = v ? VISA[v.type] || [v.type, '#5d6577'] : ['אין מידע', '#5d6577'];
   return `<div class="pr-item"><h4>🛂 ויזה לדרכון ישראלי</h4>
     <span class="badge" style="background:${color}22;color:${darkText(color)}">● ${label}${v?.days ? ` · עד ${v.days} יום` : ''}</span>
     <div class="meta">Passport Index · יש לאמת מול נציגות המדינה לפני הטיסה</div></div>`;
@@ -1139,7 +1158,7 @@ function factsItem(iso2) {
   const caps = capitalsHe(iso2);
   return `<div class="pr-item"><h4>ℹ️ פרטים כלליים</h4><dl class="facts">
     ${caps.length ? `<dt>בירה</dt><dd>${esc(caps.join(', '))}</dd>` : ''}
-    ${i.pop ? `<dt>אוכלוסייה</dt><dd>${fmtNum.format(i.pop)} <small style="color:#6b7385">(${i.popYear})</small></dd>` : ''}
+    ${i.pop ? `<dt>אוכלוסייה</dt><dd>${fmtNum.format(i.pop)} <small style="color:var(--muted)">(${i.popYear})</small></dd>` : ''}
     ${langs.length ? `<dt>שפות</dt><dd>${esc(langs.join(', '))}</dd>` : ''}
     ${cur.length ? `<dt>מטבע</dt><dd>${esc(cur.join(', '))}</dd>` : ''}
     ${i.region ? `<dt>אזור</dt><dd>${esc(REGION_HE[i.region] || i.region)}</dd>` : ''}
@@ -1280,6 +1299,7 @@ function showPoint(point, { keepTrip = false } = {}) {
 
 // a long country name gets a smaller font, so it fits beside the dates in two lines at most
 const nameCls = n => n.length > 14 ? ' class="long"' : n.length > 7 ? ' class="mid"' : '';
+let focusPanel = false, panelReturn = null;
 async function renderPanel() {
   const iso2 = state.selected; if (!iso2) return;
   const token = ++panelToken;
@@ -1295,11 +1315,12 @@ async function renderPanel() {
     const toTop = () => { $('#panel').scrollTop = 0; window.scrollTo(0, 0); };
     toTop();                          // the panel is displayed now, so this takes effect…
     requestAnimationFrame(toTop);     // …and again after the new content is laid out
+    focusPanel = true;
   }
   $('#panelBody').innerHTML = `
     <div class="p-head">
       <img src="https://flagcdn.com/w160/${iso2.toLowerCase()}.png" alt="" onerror="this.remove()">
-      <div><h2${nameCls(nameHe(iso2, p.he || p.en))}>${esc(nameHe(iso2, p.he || p.en))}</h2><div class="en">${esc(p.en)}</div></div>
+      <div><h2 id="pName" tabindex="-1"${nameCls(nameHe(iso2, p.he || p.en))}>${esc(nameHe(iso2, p.he || p.en))}</h2><div class="en">${esc(p.en)}</div></div>
       <div class="p-dates${state.pdates ? ' custom' : ''}">
         <input id="pDates" readonly aria-label="תאריכים למדינה זו" title="שינוי התאריכים למדינה זו בלבד">
         <svg class="pencil" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M11.7 1.3a1.5 1.5 0 0 1 2.1 0l.9.9a1.5 1.5 0 0 1 0 2.1L5.4 13.6 1.5 14.5l.9-3.9 9.3-9.3zM3.5 11.2l-.4 1.7 1.7-.4 7.6-7.6-1.3-1.3-7.6 7.6z"/></svg>
@@ -1321,6 +1342,8 @@ async function renderPanel() {
     <button class="linkbtn fb-link" data-open="feedback" data-from="panel" data-country="${iso2}">משהו לא מדויק כאן? ספרו לנו</button>`;
 
   setupPanelDates();
+  // keyboard and screen reader: a newly opened country is announced by moving focus to its name
+  if (focusPanel) { focusPanel = false; if (!panelReturn) panelReturn = document.activeElement; $('#pName')?.focus({ preventScroll: true }); }
   // weather
   fillMoney(iso2, token);
   // the time zone comes from a local table, so Shabbat times, daylight and local time do not wait for the weather
@@ -1353,9 +1376,9 @@ async function renderPanel() {
         ? (rainAvg != null ? `<span>משקעים <b>${rainAvg.toFixed(1)}</b> מ״מ ליום</span>` : '') : `<span>ימי גשם <b>${rainy}</b>/${days.length}</span>`}</div>
       ${normal != null ? `<div class="wx-normal">ממוצע רב־שנתי לתאריכים האלה: מקס׳ <b>${Math.round(normal)}°</b> <small>(לפיו המפה ומאתר היעדים)</small></div>` : ''}
       <div id="citiesWx"></div>
-      <table class="wx"><tr><th>יום</th><th></th><th>מקס׳</th><th>מינ׳</th><th>משקעים</th></tr>
+      <table class="wx"><tr><th>יום</th><th><span class="sr-only">מזג</span></th><th>מקס׳</th><th>מינ׳</th><th>משקעים</th></tr>
       ${days.map((d, k) => { const [ic, t] = WX(d.code); return `<tr${k >= 6 ? ' class="more"' : ''}><td>${dayLabel(d.date)}</td><td title="${t}">${ic}</td>
-        <td>${d.hi == null ? '–' : `<span class="tchip" style="background:${tempColor(d.hi)}">${Math.round(d.hi)}°</span>`}</td>
+        <td>${d.hi == null ? '–' : `<span class="tchip" style="${tempChip(d.hi)}">${Math.round(d.hi)}°</span>`}</td>
         <td>${d.lo == null ? '–' : `<span class="tchip tchip-lo" style="${tempChipLo(d.lo)}">${Math.round(d.lo)}°</span>`}</td>
         <td>${d.rain == null ? '–' : d.rain.toFixed(1) + ' מ״מ'}</td></tr>`; }).join('')}</table>
       ${days.length > 6 ? `<button class="linkbtn wx-more" data-act="wxmore">עוד ${days.length - 6} ימים ▾</button>` : ''}
@@ -1425,6 +1448,9 @@ $('#panelBody').addEventListener('click', e => {
   if (act === 'pdf') exportPdf(state.selected);
 });
 function closePanel() {
+  const back = panelReturn; panelReturn = null;
+  // focus goes back where it came from (a finder result, the search…), else to the search
+  if ($('#panel').contains(document.activeElement)) setTimeout(() => (back?.isConnected && back !== document.body ? back : $('#q')).focus());
   $('#panel').hidden = true; state.selected = null; state.pdates = null; pointMarker.remove(); restyle(); saveHash();
   resetPageZoom();
 }
@@ -1440,25 +1466,78 @@ try { if (!localStorage.getItem('tm-intro')) $('#intro').hidden = false; } catch
 $('#introOk').addEventListener('click', hideIntro);
 
 // ---------- about & privacy / feedback window ----------
+let modalReturn = null;
 function openModal(html) {
+  if ($('#modal').hidden) modalReturn = document.activeElement;
   $('#modalBody').innerHTML = html;
   $('#modal').hidden = false;
   $('#modal .m-card').scrollTop = 0;
+  $('#mTitle')?.setAttribute('tabindex', '-1');
+  $('#mTitle')?.focus();
 }
-function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; }
+function closeModal() {
+  $('#modal').hidden = true; $('#modalBody').innerHTML = '';
+  modalReturn?.focus?.(); modalReturn = null;
+}
+// Tab stays inside the open window
+$('#modal').addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const f = [...$('#modal').querySelectorAll('button, a[href], input, textarea, select, [tabindex="0"]')].filter(x => !x.disabled && x.offsetParent);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && (document.activeElement === first || document.activeElement.id === 'mTitle')) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal' || e.target.closest('.m-close')) closeModal(); });
-addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
+// Escape closes one thing at a time: the window, else the country card, else the finder. A calendar or the search suggestions
+// that are open close first (they handle Escape themselves), so the card stays
+addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!$('#modal').hidden) return closeModal();
+  const busy = pfp?.isOpen || document.querySelector('.flatpickr-calendar.open') || (e.target === q && !results.hidden);
+  if (busy) return;
+  if (!$('#panel').hidden) closePanel();
+  else if (!$('#finder').hidden) { openFinder(false); $('#finderBtn').focus(); }   // then the destination finder
+}, true);   // capture: runs before the search field hides its suggestions
+// the skip link moves focus to the search without changing the address (the hash holds the shared state)
+$('.skip').addEventListener('click', e => { e.preventDefault(); $('#q').focus(); });
 
+// the accessibility statement (תקנה 35ה): what was done, the known limits, and how to report a problem
+const A11Y_UPDATED = '09/10/2026';
+function a11yHTML() {
+  return `<h2 id="mTitle">♿ הצהרת נגישות</h2>
+    <p>אנחנו רואים חשיבות בכך שכל אחד יוכל להשתמש במפת מטיילים, כולל אנשים עם מוגבלות.
+      האתר הונגש לפי התקן הישראלי ת״י 5568 (המבוסס על הנחיות WCAG ברמה AA).</p>
+    <h3>מה הונגש</h3>
+    <ul>
+      <li>אפשר להשתמש באתר בעזרת המקלדת בלבד: Tab למעבר, Enter לבחירה, Escape לסגירת חלונות.
+        הקישור הראשון בדף מדלג ישר לחיפוש.</li>
+      <li>לכל מדינה אפשר להגיע דרך החיפוש – חלופה לבחירה על המפה.</li>
+      <li>כפתורים, חלונות וטפסים מתויגים לקוראי מסך, והודעות קצרות מוקראות.</li>
+      <li>ניגודיות הטקסט עומדת בדרישות התקן, וכל מידע שמוצג בצבע מופיע גם במילים (למשל רמת הסיכון).</li>
+      <li>אפשר להגדיל את התצוגה עד 200% בלי לאבד תוכן, גם בטלפון.</li>
+      <li>האתר בעברית, מימין לשמאל, והשפה מוגדרת לקוראי מסך.</li>
+    </ul>
+    <h3>מגבלות ידועות</h3>
+    <ul>
+      <li>המפה עצמה היא תצוגה חזותית: את הצבעים ואת המדינות שעליה אי אפשר "לקרוא" בקורא מסך. את כל המידע של כל מדינה אפשר לקבל דרך החיפוש וכרטיס המדינה.</li>
+      <li>שכבת החום והמפה בזום של רחובות מגיעות משירותי מפות חיצוניים (OpenStreetMap, Esri).</li>
+      <li>קישורי הטיסות והמלונות מובילים לאתרים חיצוניים (Skyscanner, Booking), שהנגישות בהם באחריותם.</li>
+    </ul>
+    <h3>נתקלתם בבעיית נגישות?</h3>
+    <p>נשמח לדעת ולתקן. <button class="linkbtn" data-open="feedback" data-from="a11y">ספרו לנו כאן</button> – כתבו מה ניסיתם לעשות ובאיזה מכשיר ודפדפן.</p>
+    <div class="meta">ההצהרה עודכנה ב־${A11Y_UPDATED}.</div>`;
+}
 function aboutHTML() {
-  return `<h3>🌍 על מפת מטיילים</h3>
+  return `<h2 id="mTitle">🌍 על מפת מטיילים</h2>
     <p>מפה למטיילים ישראלים ויהודים: לכל מדינה מדד סיכון, מזג אוויר לתאריכים שלכם, ויזה לדרכון ישראלי, זמני שבת וחגים,
       אירועים ומידע מעשי, ומאתר יעדים לפי טמפרטורה וסיכון. השימוש חינמי.</p>
-    <h4>🧭 מדד הסיכון</h4>
+    <h3>🧭 מדד הסיכון</h3>
     <p>המדד הוא חישוב שלנו: 60% אזהרת המסע העדכנית של <a href="${esc(state.nscMeta.url || 'https://www.gov.il/he/departments/news/travel-warnings')}" target="_blank" rel="noopener">המל״ל</a>
       ו־40% שיעור העמדות האנטישמיות לפי סקר ADL. הוא לא ייעוץ ולא תחליף לאזהרת המסע הרשמית –
       לפני נסיעה בדקו תמיד את אזהרת המל״ל המלאה. המידע באתר (מזג אוויר, ויזה, אירועים, זמנים) נאסף ממקורות ציבוריים,
       ייתכנו בו טעויות, ואין לראות בו ייעוץ מכל סוג.</p>
-    <h4>🔒 פרטיות</h4>
+    <h3>🔒 פרטיות</h3>
     <ul>
       <li>אנחנו מודדים שימוש באתר בעזרת PostHog: אילו דפים ואפשרויות נפתחו (למשל איזו מדינה, לחיצה על טיסות), באיזה מכשיר ודפדפן.
         כתובת ה־IP משמשת רק לזיהוי מדינה ועיר משוערות, ולא נשמרת.</li>
@@ -1469,7 +1548,9 @@ function aboutHTML() {
         שרואים את כתובת ה־IP כמו בכל גלישה.</li>
       <li>מה שתכתבו בטופס המשוב נשמר כדי שנוכל לקרוא אותו – אל תכתבו בו פרטים אישיים.</li>
     </ul>
-    <h4>💬 יצירת קשר</h4>
+    <h3>♿ נגישות</h3>
+    <p>האתר הונגש לפי התקן הישראלי ת״י 5568 (רמה AA). <button class="linkbtn" data-open="a11y">להצהרת הנגישות המלאה</button></p>
+    <h3>💬 יצירת קשר</h3>
     <p>הערות, טעויות או רעיונות – <button class="linkbtn" data-open="feedback">כתבו לנו</button>.</p>
     <div class="meta">נתונים: המל״ל · ADL · Open-Meteo · NASA POWER · Hebcal · Nager.Date · OpenStreetMap · Esri</div>`;
 }
@@ -1477,7 +1558,7 @@ function aboutHTML() {
 // feedback is sent to the site's analytics (PostHog) as a 'feedback' event; nothing in the page says where it goes
 function feedbackHTML(iso2) {
   const about = iso2 && state.features[iso2] ? nameHe(iso2, iso2) : '';
-  return `<h3>💬 משוב</h3>
+  return `<h2 id="mTitle">💬 משוב</h2>
     <form id="fbForm" data-country="${iso2 || ''}">
       ${about ? `<div class="fb-about">על: <b>${esc(about)}</b></div>` : ''}
       <div class="fb-mood" role="radiogroup" aria-label="איך האתר?">
@@ -1511,6 +1592,7 @@ document.addEventListener('click', e => {
   if (!b) return;
   e.preventDefault();
   if (b.dataset.open === 'about') { openModal(aboutHTML()); track('about_open'); }
+  if (b.dataset.open === 'a11y') { openModal(a11yHTML()); track('a11y_open'); }
   if (b.dataset.open === 'feedback') openFeedback(b.dataset.country || null, b.dataset.from || 'site');
 }, true);   // capture: Leaflet stops clicks in its credits corner from bubbling
 
@@ -1846,10 +1928,10 @@ async function runFinder() {
   const why = f.events && withEvents > hits.length
     ? `<div class="f-why">מתוך ${withEvents} מדינות עם אירועים בתאריכים, נפסלו: ${Object.entries(eventFails).map(([k, n]) => `${n} בגלל ${REASON[k]}`).join(' · ')}</div>` : '';
   $('#fResults').innerHTML = `<div class="f-count">${hits.length ? `נמצאו <b>${hits.length}</b> יעדים` : 'לא נמצאו יעדים – נסו להרחיב את הסינון'}</div>${why}
-    <ul class="f-list${state.finderAll ? '' : ' short'}">${hits.map(h => `<li data-iso="${h.iso2}">
+    <ul class="f-list${state.finderAll ? '' : ' short'}">${hits.map(h => `<li><button class="f-item" data-iso="${h.iso2}">
       <span>${esc(nameHe(h.iso2, (state.features[h.iso2] || state.areas[h.iso2]).properties.he || (state.features[h.iso2] || state.areas[h.iso2]).properties.en))}${f.events ? `<small class="f-ev">${h.ev.map(e => `${CAT_ICON[e.cat] || ''} ${esc(e.name)}`).join(' · ')}</small>` : ''}</span>
-      ${h.t ? `${h.t.capital ? '' : `<span class="f-city">${esc(h.t.label)}</span>`}<span class="tchip" dir="ltr" style="background:${tempColor((h.t.lo + h.t.hi) / 2)}">${Math.round(h.t.lo) === Math.round(h.t.hi) ? '' : `${Math.round(h.t.lo)}–`}${Math.round(h.t.hi)}°</span>` : ''}
-      ${h.r ? `<span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span>` : '<span class="rchip">–</span>'}</li>`).join('')}</ul>
+      ${h.t ? `${h.t.capital ? '' : `<span class="f-city">${esc(h.t.label)}</span>`}<span class="tchip" dir="ltr" style="${tempChip((h.t.lo + h.t.hi) / 2)}">${Math.round(h.t.lo) === Math.round(h.t.hi) ? '' : `${Math.round(h.t.lo)}–`}${Math.round(h.t.hi)}°</span>` : ''}
+      ${h.r ? `<span class="rchip" style="background:${h.r.color}33;color:${darkText(h.r.color)}">${h.r.score}</span>` : '<span class="rchip">–</span>'}</button></li>`).join('')}</ul>
     ${hits.length > FINDER_SHORT && !state.finderAll ? `<button class="linkbtn f-more" data-more>הצג את כל ${hits.length} היעדים</button>` : ''}
     <button class="linkbtn fb-link" data-open="feedback" data-from="finder">לא מצאתם מה שחיפשתם? ספרו לנו</button>`;
 }
