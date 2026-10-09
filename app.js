@@ -103,6 +103,8 @@ const cache = new Map(), quotaOut = new Map();
 // events wait in a queue until the SDK has loaded; if it never loads (an ad blocker), nothing breaks
 const trackQueue = [];
 function track(event, props = {}) {
+  // the Hebrew name next to the code, for readable charts (the code stays for the world map)
+  if (props.country && !props.country_name) props = { ...props, country_name: nameHe(props.country, state.features[props.country]?.properties.en || props.country) };
   if (window.posthog?.capture) window.posthog.capture(event, props);
   else trackQueue.push([event, props]);
 }
