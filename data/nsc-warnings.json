@@ -2,14 +2,14 @@
  "_meta": {
   "source": "המטה לביטחון לאומי – אזהרות מסע",
   "url": "https://www.gov.il/he/Departments/DynamicCollectors/travel-warnings-nsc",
-  "updated": "2026-10-22T05:02:55.193Z"
+  "updated": "2026-10-30T09:27:12.183Z"
  },
  "countries": {
   "UG": {
    "level": 2,
    "min": 2,
    "mixed": false,
-   "label": "איום מזדמן",
+   "label": "רמה 2 - איום מזדמן",
    "details": "לנקוט באמצעי זהירות מוגברים",
    "url": "https://www.gov.il/he/pages/1uganda",
    "nameHe": "אוגנדה"
