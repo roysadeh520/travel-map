@@ -2,99 +2,9 @@
  "_meta": {
   "source": "המטה לביטחון לאומי – אזהרות מסע",
   "url": "https://www.gov.il/he/Departments/DynamicCollectors/travel-warnings-nsc",
-  "updated": "2026-11-10T07:15:39.473Z"
+  "updated": "2026-11-14T17:15:26.851Z"
  },
  "countries": {
-  "UG": {
-   "level": 2,
-   "min": 2,
-   "mixed": false,
-   "label": "רמה 2 - איום מזדמן",
-   "details": "לנקוט באמצעי זהירות מוגברים",
-   "url": "https://www.gov.il/he/pages/1uganda",
-   "nameHe": "אוגנדה"
-  },
-  "UZ": {
-   "level": 4,
-   "min": 3,
-   "mixed": true,
-   "label": "רמת איום משולבת",
-   "details": "מרחב משותף בגבול בין אוזבקיסטן לאפגניסטן: רמת איום גבוהה (רמה 4), ממליצים להימנע מהגעה של 30 קילומטר מהגבול. שאר שטחי המדינה: רמת איום בינונית (רמה 3) ומומלץ להימנע מנסיעות שאינן חיוניות",
-   "url": "https://www.gov.il/he/pages/uzbekistan1",
-   "nameHe": "אוזבקיסטן"
-  },
-  "AT": {
-   "level": 2,
-   "min": 2,
-   "mixed": false,
-   "label": "איום מזדמן",
-   "details": "לנקוט באמצעי זהירות מוגברים",
-   "url": "https://www.gov.il/he/pages/austria1",
-   "nameHe": "אוסטריה"
-  },
-  "AU": {
-   "level": 2,
-   "min": 2,
-   "mixed": false,
-   "label": "איום מזדמן",
-   "details": "לנקוט באמצעי זהירות מוגברים",
-   "url": "https://www.gov.il/he/pages/australia1",
-   "nameHe": "אוסטרליה"
-  },
-  "UA": {
-   "level": 2,
-   "min": 2,
-   "mixed": false,
-   "label": "איום מזדמן",
-   "details": "לנקוט באמצעי זהירות מוגברים",
-   "url": "https://www.gov.il/he/pages/ukraine2",
-   "nameHe": "אוקראינה"
-  },
-  "UY": {
-   "level": 1,
-   "min": 1,
-   "mixed": false,
-   "label": "ללא אזהרה",
-   "details": "לנקוט באמצעי זהירות רגילים",
-   "url": "https://www.gov.il/he/pages/uruguay1",
-   "nameHe": "אורוגואי"
-  },
-  "AZ": {
-   "level": 3,
-   "min": 3,
-   "mixed": false,
-   "label": "איום בינוני",
-   "details": "להימנע מנסיעות שאינן חיוניות",
-   "url": "https://www.gov.il/he/pages/azerbaijan1",
-   "nameHe": "אזרביג'אן"
-  },
-  "AE": {
-   "level": 3,
-   "min": 3,
-   "mixed": false,
-   "label": "רמת איום בינונית",
-   "details": "להימנע מנסיעות שאינן חיוניות",
-   "url": "https://www.gov.il/he/pages/unitedarabemirates1",
-   "nameHe": "איחוד האמירויות הערביות"
-  },
-  "IT": {
-   "level": 2,
-   "min": 2,
-   "mixed": false,
-   "label": "איום מזדמן",
-   "details": "לנקוט באמצעי זהירות מוגברים",
-   "url": "https://www.gov.il/he/pages/italy2",
-   "nameHe": "איטליה"
-  },
-  "BS": {
-   "level": 1,
-   "min": 1,
-   "mixed": false,
-   "label": "ללא אזהרה",
-   "details": "לנקוט באמצעי זהירות רגילים",
-   "url": "https://www.gov.il/he/pages/thebahamas1",
-   "nameHe": "איי בהאמה"
-  },
   "MH": {
    "level": 1,
    "min": 1,
@@ -451,7 +361,7 @@
    "min": 2,
    "mixed": false,
    "label": "איום מזדמן",
-   "details": "לנקוט אמצעי זהירות מוגברים",
+   "details": "להימנע מנסיעות שאינן חיוניות",
    "url": "https://www.gov.il/he/pages/georgia1",
    "nameHe": "גאורגיה"
   },
